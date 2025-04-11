@@ -10,15 +10,15 @@ Key Definitions:
 ---KEY_DEFINITIONS_END---
 
 last_KEY_edit: Assigned keys: 1A, 1Aa, 1C, 2Aa, 2Ab, 2Ac, 2Ad
-last_GRID_edit: Applied suggestions (2025-04-11T15:17:14.066643)
+last_GRID_edit: Add 2Ac->2Ad (n)
 
 ---GRID_START---
 X 1A 1Aa 1C 2Aa 2Ab 2Ac 2Ad
-1A = op6
-1Aa = pop>4
-1C = ppop4
-2Aa = p3o<3
-2Ab = p4opp
-2Ac = p5op
-2Ad = p6o
+1A = o>n>4
+1Aa = <on>4
+1C = nnon4
+2Aa = <<no<3
+2Ab = <<nnonn
+2Ac = <<n3on
+2Ad = <<n4o
 ---GRID_END---
