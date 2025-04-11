@@ -1,7 +1,7 @@
 [LAST_ACTION_STATE]
-last_action: "分析核心模块实现需求和依赖关系"
+last_action: "实现核心模块的exceptions.ts文件"
 current_phase: "Execution"
-next_action: "实现核心模块的exceptions.ts文件"
+next_action: "实现核心模块的key-manager.ts文件"
 next_phase: "Execution"
 
 [CODE_ROOT_DIRECTORIES]

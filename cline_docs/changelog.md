@@ -3,6 +3,16 @@
 本文件记录项目中的重大更改，包括日期、描述、原因和受影响的文件。
 
 ## 2025-04-11
+### 实现核心模块的exceptions.ts文件
+- **描述**: 实现了核心模块的exceptions.ts文件，包括各种异常类
+- **原因**: 为依赖处理系统提供异常处理机制，确保系统能够正确处理错误情况
+- **受影响的文件**:
+  - `src/ts-dependency-system/core/exceptions.ts`
+  - `src/ts-dependency-system/core/index.ts`
+  - `.clinerules`
+  - `cline_docs/activeContext.md`
+  - `cline_docs/changelog.md`
+
 ### 分析核心模块实现需求和依赖关系
 - **描述**: 分析了核心模块的实现需求，确定了实现顺序和依赖关系
 - **原因**: 为实现核心模块做准备，确保按照正确的依赖顺序进行开发
