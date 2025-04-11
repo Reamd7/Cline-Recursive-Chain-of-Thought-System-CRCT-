@@ -2,3 +2,5 @@
 *.pyc
 *venv*
 *embeddings*
+node_modules
+coverage
