@@ -1,0 +1,17 @@
+[LAST_ACTION_STATE]
+last_action: "排除 cline_docs 目录的依赖分析"
+current_phase: "Set-up/Maintenance"
+next_action: "验证依赖关系"
+next_phase: "Set-up/Maintenance"
+
+[CODE_ROOT_DIRECTORIES]
+- src
+- cline_utils
+
+[DOC_DIRECTORIES]
+- docs
+- cline_docs
+
+[LEARNING_JOURNAL]
+- 定期更新 cline_docs 和指令文件有助于我记住已完成的工作和待完成的任务，避免丢失跟踪。
+- cline_utils 是项目源码的一部分，需要包含在代码根目录中。
