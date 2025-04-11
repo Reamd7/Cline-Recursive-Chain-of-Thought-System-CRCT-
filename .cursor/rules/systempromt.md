@@ -1,8 +1,3 @@
----
-description: 
-globs: 
-alwaysApply: true
----
 以下是翻译结果：
 
 ---

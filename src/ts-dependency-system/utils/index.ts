@@ -1,9 +1,19 @@
 /**
- * Utils Module
- * 
- * This module provides utility functions for the dependency processing system,
- * including path utilities, configuration management, cache management, and batch processing.
+ * Utility module exports for the dependency system.
+ * Provides a single entry point for all utility functions and classes.
  */
 
-// This is a placeholder file. The actual implementation will be added later.
-export const utilsModuleInitialized = true;
+// Path utilities
+export * from './path-utils';
+
+// Configuration management
+export * from './config-manager';
+
+// Cache management
+export * from './cache-manager';
+
+// Batch processing
+export * from './batch-processor';
+
+// Logger
+export * from './logger';

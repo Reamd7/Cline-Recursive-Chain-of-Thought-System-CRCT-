@@ -3,23 +3,29 @@
 ## [未发布]
 
 ### 新增
-- 实现了核心模块的 dependency-grid.ts 文件
-  - 添加了 Dependency 和 DependencyGrid 接口
-  - 实现了 createGrid 函数，用于创建新的依赖网格
-  - 实现了 validateGrid 函数，用于验证网格的一致性
-  - 实现了 getDependenciesForKey 函数，用于获取特定键的依赖关系
-  - 实现了 setDependency 函数，用于设置依赖关系
-  - 实现了 removeDependency 函数，用于移除依赖关系
-  - 实现了 compressGrid 和 decompressGrid 函数，用于网格的压缩和解压缩
-- 更新了核心模块的 index.ts 文件，导出 dependency-grid 模块的功能
-- 创建了 dependency-grid.ts 的单元测试文件，测试所有功能
+- 实现了工具模块的path-utils.ts文件
+  - 添加了路径规范化、验证和各种路径操作函数
+  - 添加了缓存支持，提高频繁使用的路径操作性能
+  - 实现了路径比较、检查和转换功能
+- 实现了工具模块的cache-manager.ts文件
+  - 添加了Cache和CacheManager类
+  - 实现了TTL缓存、依赖缓存和LRU淘汰策略
+  - 添加了缓存统计和缓存清理功能
+  - 提供了缓存装饰器，方便函数结果缓存
+- 实现了工具模块的config-manager.ts文件
+  - 使用单例模式确保全局一致的配置
+  - 添加了配置加载、保存、验证和通知功能
+  - 提供了配置监听器和验证器接口
+  - 添加了访问特定配置设置的便捷方法
+- 更新了工具模块的index.ts文件，导出所有模块功能
+- 创建了config-manager.ts的单元测试文件
 
 ### 更改
-- 更新了 activeContext.md，反映当前项目状态和下一步计划
-- 更新了 .clinerules 文件，更新了当前阶段和下一步操作
+- 更新了activeContext.md，反映当前项目状态和下一步计划
+- 更新了.clinerules文件，更新了当前阶段和下一步操作
 
 ### 修复
-- 无
+- 修复了config-manager.ts的单元测试文件，适配新的API和单例模式
 
 ## [0.1.0] - 2024-04-11
 
@@ -165,3 +171,17 @@
   - `cline_docs/system_manifest.md`
   - `cline_docs/activeContext.md`
   - `cline_docs/changelog.md`
+
+## [0.2.0] - 2024-04-12
+
+### 新增
+- 实现了核心模块的 dependency-grid.ts 文件
+  - 添加了 Dependency 和 DependencyGrid 接口
+  - 实现了 createGrid 函数，用于创建新的依赖网格
+  - 实现了 validateGrid 函数，用于验证网格的一致性
+  - 实现了 getDependenciesForKey 函数，用于获取特定键的依赖关系
+  - 实现了 setDependency 函数，用于设置依赖关系
+  - 实现了 removeDependency 函数，用于移除依赖关系
+  - 实现了 compressGrid 和 decompressGrid 函数，用于网格的压缩和解压缩
+- 更新了核心模块的 index.ts 文件，导出 dependency-grid 模块的功能
+- 创建了 dependency-grid.ts 的单元测试文件，测试所有功能
