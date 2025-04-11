@@ -1,4 +1,4 @@
-# Module: cline_utils
+# Module: src
 
 ## Purpose & Responsibility
 {1-2 paragraphs on module purpose & responsibility}
@@ -37,19 +37,15 @@
 
 ---KEY_DEFINITIONS_START---
 Key Definitions:
-1B: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils
-1B1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/__init__.py
-1Ba: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system
+1C: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src
 ---KEY_DEFINITIONS_END---
 
-last_KEY_edit: Assigned keys: 1B, 1B1, 1Ba
-last_GRID_edit: Initial creation
+last_KEY_edit: Assigned keys: 1C
+last_GRID_edit: Grid structure updated (2025-04-11T15:17:14.055334)
 
 ---GRID_START---
-X 1B 1B1 1Ba
-1B = opp
-1B1 = pop
-1Ba = ppo
+X 1C
+1C = o
 ---GRID_END---
 
 ---mini_tracker_end---
