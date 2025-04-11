@@ -3,14 +3,11 @@ description:
 globs: 
 alwaysApply: true
 ---
-以下是翻译结果：
-
----
 # Cline 递归链式思考系统 (CRCT) 欢迎
 
 本文概述了 CRCT 的基本原则、所需文件、工作流程结构和必要程序，CRCT 是所有操作阶段都在其中运行的总体框架。具体说明和详细程序在 `cline_docs/prompts` 中特定阶段的插件文件中提供。
 
-**重要说明：** CRCT 系统在不同的*阶段*（设置/维护、策略、执行）中运行，**仅**由 `.clinerules` 中的 `current_phase` 设置控制。“计划模式”独立于该系统的*阶段*。插件加载*始终*由 `current_phase` 决定。
+**重要说明：** CRCT 系统在不同的*阶段*（设置/维护、策略、执行）中运行，**仅**由 `.clinerules` 中的 `current_phase` 设置控制。"计划模式"独立于该系统的*阶段*。插件加载*始终*由 `current_phase` 决定。
 
 ---
 
@@ -38,6 +35,9 @@ alwaysApply: true
 - **强制验证**：在更改之前，始终根据当前文件系统状态验证计划的操作。
 - **主动识别文档和代码根目录**：系统必须智能地识别和区分项目文档和代码目录与其他目录（文档、第三方库等）。 这在**设置/维护**期间完成。 已识别的文档和代码根目录存储在 `.clinerules` 中。
 - **分层文档：** 利用分层设计令牌架构 (HDTA) 进行项目规划，将信息组织到系统清单、域模块、实施计划和任务说明中。
+- **任务驱动开发：** 将 `cline_docs/tasks` 目录作为任务管理的核心，自动识别、跟踪和管理任务及其依赖关系。
+- **智能依赖分析：** 自动分析任务与代码模块之间的依赖关系，确保任务执行的正确顺序和完整性。
+- **任务状态追踪：** 维护任务的状态、优先级和进度，确保项目进展的可视化和可控性。
 
 ---
 
@@ -55,7 +55,7 @@ alwaysApply: true
 | `doc_tracker.md`               | 记录文档依赖关系                                                            | `{doc_dir}/`   | 使用 `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
 
 *说明*：
-- `{memory_dir}`（例如，`cline_docs/`）用于操作内存；`{doc_dir}`（例如，`docs/`）用于项目文档。“模块”是项目代码根目录中的顶层目录。
+- `{memory_dir}`（例如，`cline_docs/`）用于操作内存；`{doc_dir}`（例如，`docs/`）用于项目文档。"模块"是项目代码根目录中的顶层目录。
 - **对于跟踪器文件 (`module_relationship_tracker.md`、`doc_tracker.md`、迷你跟踪器)，*不要*手动创建或修改。始终使用指定的 `dependency_processor.py` 脚本以确保正确的格式和数据一致性。**
 - 对于其他文件，如果需要，手动创建，内容最少（例如，标题或基本结构）。
 - 将 `src tests` 和 `docs` 替换为 `.clinerules` 中 `[CODE_ROOT_DIRECTORIES]` 和 `[DOC_DIRECTORIES]` 中的实际路径。
@@ -102,7 +102,7 @@ next_phase: "设置/维护"
 ### 阶段转换检查表
 在切换阶段之前：
 - **设置/维护 → 策略**：确认 `doc_tracker.md` 和 `module_relationship_tracker.md` 没有 'p' 占位符，并且 `.clinerules` 中的 `[CODE_ROOT_DIRECTORIES]` 和 `[DOC_DIRECTORIES]` 已填充。
-- **策略 → 执行**：验证指令文件是否包含完整的“步骤”和“依赖项”部分。
+- **策略 → 执行**：验证指令文件是否包含完整的"步骤"和"依赖项"部分。
 
 有关详细信息，请参见下面的工作流程图和插件说明。
 
@@ -178,7 +178,7 @@ flowchart TD
 
 ## V. 依赖关系跟踪器管理（概述）
 
-`module_relationship_tracker.md`、`doc_tracker.md` 和迷你跟踪器至关重要。 详细步骤在设置/维护插件 (`cline_docs/prompts/setup_maintenance_plugin.md`) 中。 **所有跟踪器管理都必须使用 `dependency_processor.py` 脚本完成。**
+`module_relationship_tracker.md`、`doc_tracker.md`、任务跟踪器和迷你跟踪器至关重要。 详细步骤在设置/维护插件 (`cline_docs/prompts/setup_maintenance_plugin.md`) 中。 **所有跟踪器管理都必须使用 `dependency_processor.py` 脚本完成。**
 
 **跟踪器概述表：**
 
@@ -186,6 +186,7 @@ flowchart TD
 |-------------------------------|---------------------------------------------------|-----------------------|------------------------------------------------|-------------------------------|
 | `doc_tracker.md`                 | `{doc_dir}/` 文件依赖关系                              | 文档到文档            | `{memory_dir}/`                                  | 最高                           |
 | `module_relationship_tracker.md` | 模块级依赖关系                                            | 模块到模块            | `{memory_dir}/`                               | 高                             |
+| 任务跟踪器                      | 任务间依赖关系                                      | 任务到任务            | `{memory_dir}/tasks/`                        | 高                             |
 | 迷你跟踪器                      | 模块内文件/函数/文档依赖关系                      | 文件/函数/文档级别   | `{module_name}_module.md`               | 低                             |
 
 **依赖关系字符：**
@@ -197,6 +198,14 @@ flowchart TD
 - `n`：已验证无依赖。
 - `p`：占位符（未验证）。
 - `s`：语义依赖
+- `t`：任务依赖
+
+**任务依赖关系管理：**
+1. **自动任务识别：** 系统会自动扫描 `cline_docs/tasks` 目录，识别所有任务文件。
+2. **依赖关系分析：** 使用自然语言处理分析任务描述，自动识别任务间的依赖关系。
+3. **状态跟踪：** 维护每个任务的状态（待处理、进行中、已完成、阻塞）。
+4. **优先级管理：** 根据依赖关系和项目需求自动计算任务优先级。
+5. **进度追踪：** 记录任务的完成进度和预计完成时间。
 
 ---
 
@@ -237,7 +246,7 @@ flowchart TD
     *   **示例**：`python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key> [--dep-type <char>]`**:
-    *   **目的**：手动设置指定 `<tracker_file>` 中两个键之间的特定依赖关系字符 ('<'、'>'、'x'、'd'、's'、'S'、'n'、'p')。 使用此方法更正 `analyze-project` 中的建议，或显式标记已验证的关系（包括“n”表示无依赖关系）。
+    *   **目的**：手动设置指定 `<tracker_file>` 中两个键之间的特定依赖关系字符 ('<'、'>'、'x'、'd'、's'、'S'、'n'、'p')。 使用此方法更正 `analyze-project` 中的建议，或显式标记已验证的关系（包括"n"表示无依赖关系）。
     *   **示例（设置依赖关系）**：`python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type ">"`
     *   **示例（设置无依赖关系）**：`python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type "n"`
 
@@ -288,11 +297,11 @@ flowchart TD
      - 主要包含配置文件（`.ini`、`.yaml`、`.toml`、`.json`）的目录，*除非*这些文件明显是项目核心逻辑的一部分。
    - **结构**: 如果你看到嵌套的结构，即文件位于 src 文件夹内的文件夹中，例如 `src/module1/file1.py`，则包含 `src` 而不是 `src/module1`。
 3. **链式思考推理：** 对于每个潜在目录，生成一个链式思考来解释*为什么*它被考虑（或拒绝）。
-4. **使用 `[CODE_ROOT_DIRECTORIES]` 更新 `.clinerules`。** 确保指定了 `next_action`，例如，“生成键”或另一个未完成的设置步骤。
+4. **使用 `[CODE_ROOT_DIRECTORIES]` 更新 `.clinerules`。** 确保指定了 `next_action`，例如，"生成键"或另一个未完成的设置步骤。
 5. **MUP：** 遵循强制更新协议。
 
 **链式思考示例：**
-“扫描项目根目录，我看到目录：`.vscode`、`docs`、`cline_docs`、`src`、`cline_utils`、`venv`。`.vscode` 和 `venv` 被排除，因为它们分别是 IDE 配置和虚拟环境。 `docs` 和 `cline_docs` 被排除，因为它们是文档。 `src` 直接包含 Python 文件，因此它是一个强有力的候选者。 `cline_utils` 也包含 `.py` 文件，但似乎是 CRCT 系统的一部分，而不是特定于项目的，因此将其排除。 因此，我将 `src` 而不是 `cline_utils` 添加到 `.clinerules` 的 `[CODE_ROOT_DIRECTORIES]` 部分。”
+"扫描项目根目录，我看到目录：`.vscode`、`docs`、`cline_docs`、`src`、`cline_utils`、`venv`。`.vscode` 和 `venv` 被排除，因为它们分别是 IDE 配置和虚拟环境。 `docs` 和 `cline_docs` 被排除，因为它们是文档。 `src` 直接包含 Python 文件，因此它是一个强有力的候选者。 `cline_utils` 也包含 `.py` 文件，但似乎是 CRCT 系统的一部分，而不是特定于项目的，因此将其排除。 因此，我将 `src` 而不是 `cline_utils` 添加到 `.clinerules` 的 `[CODE_ROOT_DIRECTORIES]` 部分。"
 
 ---
 
@@ -313,7 +322,7 @@ flowchart TD
 5. **MUP：** 遵循强制更新协议。
 
 **链式思考示例：**
-“扫描项目根目录，我看到目录：`docs`、`documentation`、`src`、`tests`。 `docs` 主要包含描述项目架构和 API 的 Markdown 文件。 `documentation` 包含 HTML 格式的用户指南。 两者似乎都是文档目录。 `src` 和 `tests` 包含代码，并且已被识别为代码根目录。 因此，我将 `docs` 和 `documentation` 添加到 `.clinerules` 的 `[DOC_DIRECTORIES]` 部分。”
+"扫描项目根目录，我看到目录：`docs`、`documentation`、`src`、`tests`。 `docs` 主要包含描述项目架构和 API 的 Markdown 文件。 `documentation` 包含 HTML 格式的用户指南。 两者似乎都是文档目录。 `src` 和 `tests` 包含代码，并且已被识别为代码根目录。 因此，我将 `docs` 和 `documentation` 添加到 `.clinerules` 的 `[DOC_DIRECTORIES]` 部分。"
 
 ## XII. 分层设计令牌架构 (HDTA)
 此系统利用 HDTA 进行与*项目*相关的*系统*级文档。 信息分为四个层级组织：
@@ -358,7 +367,7 @@ LLM **必须**每 5 个轮次/交互执行一次完整的强制更新协议 (MUP
 
 CRCT 框架通过递归分解和持久状态来管理复杂任务。 遵循此提示和 `cline_docs/prompts/` 中的插件说明，以实现有效的任务管理。
 
-**遵守“不要重复自己” (DRY) 和关注点分离原则。**
+**遵守"不要重复自己" (DRY) 和关注点分离原则。**
 
 ---
 
