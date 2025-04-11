@@ -1,6 +1,56 @@
 # 变更日志
 
-本文件记录项目中的重大更改，包括日期、描述、原因和受影响的文件。
+## [未发布]
+
+### 新增
+- 实现了核心模块的 dependency-grid.ts 文件
+  - 添加了 Dependency 和 DependencyGrid 接口
+  - 实现了 createGrid 函数，用于创建新的依赖网格
+  - 实现了 validateGrid 函数，用于验证网格的一致性
+  - 实现了 getDependenciesForKey 函数，用于获取特定键的依赖关系
+  - 实现了 setDependency 函数，用于设置依赖关系
+  - 实现了 removeDependency 函数，用于移除依赖关系
+  - 实现了 compressGrid 和 decompressGrid 函数，用于网格的压缩和解压缩
+- 更新了核心模块的 index.ts 文件，导出 dependency-grid 模块的功能
+- 创建了 dependency-grid.ts 的单元测试文件，测试所有功能
+
+### 更改
+- 更新了 activeContext.md，反映当前项目状态和下一步计划
+- 更新了 .clinerules 文件，更新了当前阶段和下一步操作
+
+### 修复
+- 无
+
+## [0.1.0] - 2024-04-11
+
+### 新增
+- 实现了核心模块的 exceptions.ts 文件
+  - 添加了 DependencySystemError 基类
+  - 添加了 TrackerError、EmbeddingError、AnalysisError、ConfigurationError、CacheError、KeyGenerationError 和 GridValidationError 异常类
+- 实现了核心模块的 key-manager.ts 文件
+  - 添加了 KeyInfo 接口
+  - 实现了 generateKeys 函数，用于生成层次化键
+  - 实现了 validateKey 函数，用于验证键的有效性
+  - 实现了 getPathFromKey 和 getKeyFromPath 函数，用于键和路径之间的转换
+  - 实现了 sortKeyStringsHierarchically 和 sortKeys 函数，用于键的排序
+  - 实现了 regenerateKeys 函数，用于重新生成键
+- 创建了 key-manager.ts 的单元测试文件
+- 修复了 key-manager.ts 的测试问题，使用 mock-fs 和 pathe 库改进测试稳定性
+
+### 更改
+- 创建了 .clinerules 文件，确定了代码根目录和文档目录
+- 创建了 setup_maintenance_plugin.md 文件，提供设置/维护阶段的指导
+- 创建了 system_manifest.md 文件，提供系统的高级概述
+- 修改了 .clinerules.config.json 文件，将 cline_docs 添加到排除路径中
+- 重新运行了 analyze-project 命令，排除了 cline_docs 目录的依赖分析
+- 验证了依赖关系，将占位符依赖关系更新为实际依赖类型
+- 从设置/维护阶段转换到策略阶段，更新了相关文件
+- 创建了 implementation_plan_typescript_dependency_system.md 文件，详细说明了如何使用TypeScript + Node重新实现依赖处理系统
+- 创建了9个任务指令文件，详细说明了实现各个组件的步骤和依赖关系
+- 完成了TypeScript项目结构设置，包括创建目录结构、初始化Node.js项目、安装依赖项、配置TypeScript编译器和Jest测试框架
+
+### 修复
+- 无
 
 ## 2025-04-11
 ### 完善key-manager.ts的测试用例并修复测试问题
