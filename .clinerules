@@ -1,7 +1,7 @@
 [LAST_ACTION_STATE]
-last_action: "修复了批处理器(batch-processor.ts)的进度显示功能，确保进度信息正确显示"
+last_action: "完成了IO模块的实现，包括tracker-io.ts、update-doc-tracker.ts、update-main-tracker.ts和update-mini-tracker.ts文件的功能开发和测试"
 current_phase: "Execution"
-next_action: "实现IO模块"
+next_action: "实现分析模块"
 next_phase: "Execution"
 
 [CODE_ROOT_DIRECTORIES]
@@ -24,3 +24,5 @@ next_phase: "Execution"
 - 在实现依赖网格时，需要特别注意依赖关系的对称性和一致性，确保网格验证的准确性。
 - 压缩和解压缩功能对于大型依赖网格的存储和传输非常重要，应该确保其正确性和效率。
 - 在实现工具模块时，合理使用缓存可以显著提高频繁使用的路径操作和配置访问的性能。
+- 在IO模块实现中，统一错误处理和文件路径规范化至关重要，确保跨平台兼容性和系统健壮性。
+- 实现IO模块时遵循Python版本的架构和功能，但利用TypeScript的类型系统和异步特性改进代码结构和性能。
