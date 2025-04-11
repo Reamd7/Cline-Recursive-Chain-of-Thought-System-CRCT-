@@ -1,7 +1,7 @@
 [LAST_ACTION_STATE]
-last_action: "验证依赖关系"
-current_phase: "Set-up/Maintenance"
-next_action: "准备转换到策略阶段"
+last_action: "转换到策略阶段"
+current_phase: "Strategy"
+next_action: "加载策略阶段插件"
 next_phase: "Strategy"
 
 [CODE_ROOT_DIRECTORIES]
@@ -16,3 +16,4 @@ next_phase: "Strategy"
 - 定期更新 cline_docs 和指令文件有助于我记住已完成的工作和待完成的任务，避免丢失跟踪。
 - cline_utils 是项目源码的一部分，需要包含在代码根目录中。
 - 验证依赖关系时，对于没有明确依赖关系的模块，可以暂时设置为'n'（无依赖），以便将来进一步分析。
+- 在完成设置/维护阶段的所有要求后，应及时转换到策略阶段，以便开始任务分解和指令文件创建。
