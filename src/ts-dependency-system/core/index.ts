@@ -8,5 +8,8 @@
 // Export all exception classes
 export * from './exceptions';
 
-// This is a placeholder file. The actual implementation will be added later.
+// Export all key management functions and interfaces
+export * from './key-manager';
+
+// This indicates that the core module has been initialized
 export const coreModuleInitialized = true;
