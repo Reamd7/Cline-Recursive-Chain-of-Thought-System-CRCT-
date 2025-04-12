@@ -3,6 +3,16 @@
 ## [未发布]
 
 ### 新增
+- 实现了命令行接口bin/dependency-processor.ts
+  - 添加了Commander.js实现命令行参数解析
+  - 实现了analyze-file和analyze-project命令处理函数
+  - 实现了compress和decompress命令处理函数
+  - 实现了get_char和set_char命令处理函数
+  - 实现了add-dependency和remove-key命令处理函数
+  - 实现了merge-trackers和export-tracker命令处理函数
+  - 实现了clear-caches、update-config和reset-config命令处理函数
+  - 实现了show-dependencies命令处理函数
+- 在package.json中添加了bin配置，将dependency-processor注册为可执行脚本
 - 实现了IO模块的tracker-io.ts文件
   - 添加了getTrackerPath函数，获取各类型跟踪器的路径
   - 添加了readTrackerFile函数，读取和解析跟踪器文件
