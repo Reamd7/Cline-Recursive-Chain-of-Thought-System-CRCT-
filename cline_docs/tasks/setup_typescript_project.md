@@ -8,6 +8,12 @@
 ## 上下文
 我们需要使用TypeScript + Node技术重新实现`cline_utils`目录中的Python依赖处理系统。在开始实现具体功能之前，需要先设置项目的基本结构，包括创建目录、配置TypeScript编译器、安装必要的依赖项等。
 
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 ## 步骤
 1. 在`src`目录下创建`ts-dependency-system`目录，作为TypeScript实现的根目录
 2. 创建项目的基本目录结构, 参考 python 目录中的文件结构

@@ -8,6 +8,12 @@
 ## 上下文
 异常类是依赖处理系统的基础组件，用于处理各种错误情况。Python版本在`cline_utils/dependency_system/core/exceptions.py`中定义了异常类，而TypeScript版本在`src/ts-dependency-system/core/exceptions.ts`中定义。我们需要确保这两个版本的异常类定义完全一致，包括类名、继承关系和行为。
 
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 ## 步骤
 1. 提取Python版本的异常类清单
    - 打开`cline_utils/dependency_system/core/exceptions.py`

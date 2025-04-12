@@ -6,6 +6,13 @@
 对比Python版本和TypeScript版本的依赖分析器模块，确保所有函数、接口和行为在两个版本中保持一致。
 
 ## 上下文
+
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 依赖分析器模块是依赖处理系统的核心分析组件，负责分析文件的导入、函数调用和文档引用，从而识别文件之间的依赖关系。Python版本在`cline_utils/dependency_system/analysis/dependency_analyzer.py`中实现，TypeScript版本在`src/ts-dependency-system/analysis/dependency-analyzer.ts`中实现。由于该模块直接负责识别依赖关系，其行为一致性对整个系统的准确性至关重要。
 
 ## 步骤

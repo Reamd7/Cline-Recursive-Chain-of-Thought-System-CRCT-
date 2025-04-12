@@ -9,6 +9,12 @@
 ## 上下文
 IO模块负责处理依赖处理系统的文件输入和输出操作，特别是与跟踪器文件的交互。这些功能依赖于核心模块和工具模块，因此需要在它们之后实现。IO模块对应于Python版本中的`cline_utils/dependency_system/io`目录。
 
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 ## 步骤
 1. ✅ 实现`tracker-io.ts`文件
    - 在`src/ts-dependency-system/io`目录下创建`tracker-io.ts`文件

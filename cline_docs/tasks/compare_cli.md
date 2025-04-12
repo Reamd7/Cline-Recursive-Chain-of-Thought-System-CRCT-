@@ -8,6 +8,12 @@
 ## 上下文
 命令行接口是用户与依赖处理系统交互的主要方式，Python版本在`cline_utils/dependency_system/dependency_processor.py`中实现，TypeScript版本在`src/ts-dependency-system/bin/dependency-processor.ts`中实现。由于命令行接口直接面向用户，其一致性对系统的可用性和用户体验至关重要。
 
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 ## 步骤
 1. 提取Python版本的命令和选项清单
    - 打开`cline_utils/dependency_system/dependency_processor.py`

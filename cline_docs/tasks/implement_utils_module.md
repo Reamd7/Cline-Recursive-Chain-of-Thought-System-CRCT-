@@ -9,6 +9,12 @@
 ## 上下文
 工具模块提供了依赖处理系统所需的各种实用功能，如路径处理、配置管理、缓存管理和批处理。这些功能被系统的其他部分广泛使用，因此需要在核心模块之后实现。工具模块对应于Python版本中的`cline_utils/dependency_system/utils`目录。
 
+## 重要原则
+**本任务必须遵循以下核心原则：**
+1. **不得修改Python代码**：Python实现被视为参考实现，所有的代码修改都只应该应用于TypeScript实现。
+2. **TypeScript代码必须与Python代码一致**：如果发现TypeScript实现与Python实现之间存在差异，应始终通过修改TypeScript代码使其与Python实现保持一致。
+3. **保持接口和行为完全一致**：确保两个版本的接口参数、返回值、异常处理和边缘情况行为完全一致。
+
 ## 步骤
 1. ✅ 实现`path-utils.ts`文件
    - ✅ 在`src/ts-dependency-system/utils`目录下创建`path-utils.ts`文件
