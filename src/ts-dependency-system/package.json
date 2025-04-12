@@ -36,5 +36,9 @@
     "pathe": "^2.0.3",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@types/glob": "^8.1.0",
+    "glob": "^11.0.1"
   }
 }
