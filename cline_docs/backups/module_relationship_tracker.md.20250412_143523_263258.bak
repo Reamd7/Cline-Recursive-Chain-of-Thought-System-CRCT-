@@ -11,44 +11,38 @@ Key Definitions:
 2Ae: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/io
 2Af: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src
 2Ag: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/utils
-3Ca: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/core/__tests__
 3Da: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report
 3Fa: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src/ts-dependency-system
 4Aa: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src/ts-dependency-system/analysis
-4Ab: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src/ts-dependency-system/src
 5Aa: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report/ts-dependency-system/analysis
 5Ab: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report/ts-dependency-system/bin
 5Ac: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report/ts-dependency-system/core
 5Ad: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report/ts-dependency-system/io
 5Ae: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/coverage/lcov-report/ts-dependency-system/utils
-5Ba: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src/ts-dependency-system/src/ts-dependency-system
 ---KEY_DEFINITIONS_END---
 
-last_KEY_edit: Assigned keys: 1A, 1Aa, 1C, 1Ca, 2Aa, 2Aa, 2Ab, 2Ab, 2Ac, 2Ac, 2Ad, 2Ad, 2Ae, 2Af, 2Ag, 3Ca, 3Da, 3Fa, 4Aa, 4Aa, 4Ab, 5Aa, 5Ab, 5Ac, 5Ad, 5Ae, 5Ba
-last_GRID_edit: Grid structure updated (2025-04-12T14:35:23.264100)
+last_KEY_edit: Assigned keys: 1A, 1Aa, 1C, 1Ca, 2Aa, 2Aa, 2Ab, 2Ab, 2Ac, 2Ac, 2Ad, 2Ad, 2Ae, 2Af, 2Ag, 3Da, 3Fa, 4Aa, 4Aa, 5Aa, 5Ab, 5Ac, 5Ad, 5Ae
+last_GRID_edit: Applied suggestions (2025-04-11T18:19:27.777414)
 
 ---GRID_START---
-X 1A 1Aa 1C 1Ca 2Aa 2Ab 2Ac 2Ad 2Ae 2Af 2Ag 3Ca 3Da 3Fa 4Aa 4Ab 5Aa 5Ab 5Ac 5Ad 5Ae 5Ba
-1A = o>np>4p14
-1Aa = <onp>4p14
-1C = nnopn4p14
-1Ca = p3op<p4sp11
-2Aa = <<npo<3p14
-2Ab = <<npnonnp14
-2Ac = <<npnnonp14
-2Ad = <<npn3op14
-2Ae = p8op13
-2Af = p9op12
-2Ag = p10op11
-3Ca = p11op10
-3Da = p12op9
-3Fa = p13op8
-4Aa = p14op7
-4Ab = p15op6
-5Aa = p16op5
-5Ab = p17op4
-5Ac = p18op3
-5Ad = p19opp
-5Ae = p20op
-5Ba = p21o
+X 1A 1Aa 1C 1Ca 2Aa 2Ab 2Ac 2Ad 2Ae 2Af 2Ag 3Da 3Fa 4Aa 5Aa 5Ab 5Ac 5Ad 5Ae
+1A = o>np>4p11
+1Aa = <onp>4p11
+1C = nnopn4p11
+1Ca = p3op<p4sp8
+2Aa = <<npo<3p11
+2Ab = <<npnonnp11
+2Ac = <<npnnonp11
+2Ad = <<npn3op11
+2Ae = p8op10
+2Af = p9op9
+2Ag = p10op8
+3Da = p11op7
+3Fa = p12op6
+4Aa = p13op5
+5Aa = p14op4
+5Ab = p15op3
+5Ac = p16opp
+5Ad = p17op
+5Ae = p18o
 ---GRID_END---

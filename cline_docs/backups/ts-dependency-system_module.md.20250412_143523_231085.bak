@@ -66,47 +66,45 @@ ts-dependency-system模块是使用TypeScript + Node技术重新实现的依赖�
 
 ---KEY_DEFINITIONS_START---
 Key Definitions:
-1B1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/docs/api-reference.md
 1Ca: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system
-1Ca1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/.clinerules.config.json
-1Ca2: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/.npmrc
-1Ca3: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/index.ts
-1Ca4: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/jest.config.js
-1Ca5: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/package.json
-1Ca6: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/pnpm-lock.yaml
-1Ca7: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/tsconfig.json
-1Ca8: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/types.d.ts
+1Ca1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/.npmrc
+1Ca2: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/index.ts
+1Ca3: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/jest.config.js
+1Ca4: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/package.json
+1Ca5: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/pnpm-lock.yaml
+1Ca6: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/tsconfig.json
 2Aa: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system/analysis
 2Ab: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system/core
+2Ab1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system/core/__init__.py
 2Ac: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system/io
 2Ad: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_utils/dependency_system/utils
 2Ae: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/io
 2Af: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/src
 2Ag: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/utils
+2Ag1: /Users/gemini/Documents/ai-infra/Cline-Recursive-Chain-of-Thought-System-CRCT-/src/ts-dependency-system/utils/index.ts
 ---KEY_DEFINITIONS_END---
 
-last_KEY_edit: Assigned keys: 1B1, 1Ca, 1Ca1, 1Ca2, 1Ca3, 1Ca4, 1Ca5, 1Ca6, 1Ca7, 1Ca8, 2Aa, 2Aa, 2Ab, 2Ab, 2Ac, 2Ac, 2Ad, 2Ad, 2Ae, 2Af, 2Ag
-last_GRID_edit: Applied suggestions (2025-04-12T14:35:23.234091)
+last_KEY_edit: Assigned keys: 1Ca, 1Ca1, 1Ca2, 1Ca3, 1Ca4, 1Ca5, 1Ca6, 2Aa, 2Aa, 2Ab, 2Ab, 2Ab1, 2Ab1, 2Ac, 2Ac, 2Ad, 2Ad, 2Ae, 2Af, 2Ag, 2Ag1
+last_GRID_edit: Applied suggestions (2025-04-11T18:19:27.752341)
 
 ---GRID_START---
-X 1B1 1Ca 1Ca1 1Ca2 1Ca3 1Ca4 1Ca5 1Ca6 1Ca7 1Ca8 2Aa 2Ab 2Ac 2Ad 2Ae 2Af 2Ag
-1B1 = op16
-1Ca = pop15
-1Ca1 = ppop14
-1Ca2 = p3opSp11
-1Ca3 = p4osSsp9
-1Ca4 = p3SsoSSpSp7
-1Ca5 = sp3SSoSp9
-1Ca6 = p4sSSop9
-1Ca7 = p8op8
-1Ca8 = p5Sp3op7
-2Aa = p10op6
-2Ab = p11op5
-2Ac = p12op4
-2Ad = p13op3
-2Ae = p14opp
-2Af = p15op
-2Ag = p16o
+X 1Ca 1Ca1 1Ca2 1Ca3 1Ca4 1Ca5 1Ca6 2Aa 2Ab 2Ab1 2Ac 2Ad 2Ae 2Af 2Ag 2Ag1
+1Ca = op15
+1Ca1 = pop14
+1Ca2 = ppopSp4<p6
+1Ca3 = p3ospsp9
+1Ca4 = ppSsoSSp8s
+1Ca5 = p4Sop10
+1Ca6 = p3sSpop9
+2Aa = p7op8
+2Ab = p8op7
+2Ab1 = p9op6
+2Ac = p10op5
+2Ad = p11op4
+2Ae = p12op3
+2Af = p13opp
+2Ag = p14op
+2Ag1 = p15o
 ---GRID_END---
 
 ---mini_tracker_end---
