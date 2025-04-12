@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "TypeScript implementation of the dependency processing system",
   "main": "index.js",
+  "bin": {
+    "dependency-processor": "./dist/bin/dependency-processor.js"
+  },
   "directories": {
     "test": "tests"
   },
