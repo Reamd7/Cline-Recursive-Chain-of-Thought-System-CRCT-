@@ -560,7 +560,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     all_deps_by_type_disp = defaultdict(list) 
     # --- Use a set to track (display_char, dependency_gi_str) pairs already added ---
     added_dep_tuples_for_display_char: Dict[str, Set[str]] = defaultdict(set)
-    origin_map_disp = defaultdict(lambda: defaultdict(set))
+    origin_map_disp = defaultdict(set) # CORRECTED INITIALIZATION
 
     for (src_gi_link, tgt_gi_link), (char, origs) in aggregated_links_instance_specific.items():
         display_char = char
@@ -985,4 +985,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()

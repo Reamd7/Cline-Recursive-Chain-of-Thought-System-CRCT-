@@ -379,7 +379,7 @@ def aggregate_all_dependencies(
                      continue
 
                 for col_idx, dep_char_val in enumerate(decompressed_row_chars):
-                    if dep_char_val in (DIAGONAL_CHAR, EMPTY_CHAR, PLACEHOLDER_CHAR): continue
+                    if dep_char_val == DIAGONAL_CHAR or dep_char_val == EMPTY_CHAR: continue
                     
                     target_ki_global = effective_ki_list_for_this_tracker[col_idx]
                     if not target_ki_global: # Path for this col wasn't globally stable/valid
