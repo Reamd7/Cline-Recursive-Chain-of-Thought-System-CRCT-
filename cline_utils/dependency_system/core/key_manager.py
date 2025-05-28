@@ -272,7 +272,13 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                             logger.critical(error_msg)
                             raise KeyGenerationError(error_msg) # Terminate generation
 
-                        # <<< CORRECTED: Use promoted_dir_ord, reset to 'A' for first one >>>
+                        if promoted_dir_ord > ASCII_Z_UPPER:
+                             error_msg = (f"Key generation failed: Exceeded maximum promoted directories (26, 'A'-'Z') at tier {new_tier} "
+                                         f"within parent key '{parent_key_string}' (path: '{norm_dir_path}'). Item: '{item_name}'.")
+                             logger.critical(error_msg)
+                             raise KeyGenerationError(error_msg)
+
+
                         new_dir_letter = chr(promoted_dir_ord)
                         promoted_dir_ord += 1 # Increment for the *next* promoted dir at this level
 
@@ -522,6 +528,20 @@ def get_key_from_path(path: str, path_to_key_info: Dict[str, KeyInfo]) -> Option
     info = path_to_key_info.get(norm_path)
     return info.key_string if info else None
 
+def get_sortable_parts_for_key(key_str: str) -> list:
+    """
+    Splits a key string into parts and converts numeric parts to integers
+    for hierarchical/natural sorting.
+    """
+    if not key_str or not isinstance(key_str, str): return []
+    parts = re.findall(KEY_PATTERN, key_str)
+    try:
+        converted_parts = [(int(p) if p.isdigit() else p) for p in parts]
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert parts for sorting key string '{key_str}', using original string parts.")
+        converted_parts = parts # Fallback to string parts
+    return converted_parts
+
 def sort_key_strings_hierarchically(keys: List[str]) -> List[str]:
     """
     Sorts a list of key strings hierarchically (natural sort order).
@@ -549,7 +569,7 @@ def sort_key_strings_hierarchically(keys: List[str]) -> List[str]:
 
     # Filter out potential None or non-string elements before sorting
     valid_keys = [k for k in keys if isinstance(k, str) and k]
-    return sorted(valid_keys, key=sort_key_func)
+    return sorted(valid_keys, key=get_sortable_parts_for_key) # Use the new helper
 
 # --- Modify sort_keys to be explicit about KeyInfo ---
 # Rename original sort_keys to avoid confusion if needed, or keep as is

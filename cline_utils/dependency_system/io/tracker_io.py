@@ -21,6 +21,7 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 # --- Core Imports ---
 from cline_utils.dependency_system.core.key_manager import (
     KeyInfo,
+    get_sortable_parts_for_key,
     load_global_key_map,
     load_old_global_key_map,
     validate_key as validate_key_format, 
@@ -719,7 +720,7 @@ def merge_trackers(primary_tracker_path: str, secondary_tracker_path: str, outpu
         # The final sorted list of KeyInfo for the merged tracker's structure
         temp_merged_ki_list_sorted = sorted(
             list(merged_key_info_objects_by_path.values()),
-            key=lambda ki_lambda: (sort_key_strings_hierarchically([ki_lambda.key_string])[0] if ki_lambda.key_string else "", ki_lambda.norm_path)
+            key=lambda ki_lambda: (get_sortable_parts_for_key(ki_lambda.key_string) if ki_lambda.key_string else [], ki_lambda.norm_path)
         )
         # Ensure input grids align with their KI lists before merging
         # This check should ideally be inside _parse_tracker_for_merge or _merge_grids
@@ -746,7 +747,6 @@ def merge_trackers(primary_tracker_path: str, secondary_tracker_path: str, outpu
                 sec_grid_comp.extend(sec_grid_comp_pad_rows[len(sec_grid_comp):])
             elif len(sec_grid_comp) > len(sec_ki_list):
                 sec_grid_comp = sec_grid_comp[:len(sec_ki_list)]
-            # --- END OF MODIFICATION ---
 
         final_merged_grid_comp = _merge_grids(
             pri_grid_comp, sec_grid_comp, 
@@ -755,9 +755,9 @@ def merge_trackers(primary_tracker_path: str, secondary_tracker_path: str, outpu
         )
         final_merged_last_key_edit = pri_data["last_key_edit"] or sec_data["last_key_edit"]
 
-    final_merged_key_info_list_for_write = sorted( # Re-sort final list just to be certain
+    final_merged_key_info_list_for_write = sorted( 
             list(merged_key_info_objects_by_path.values()),
-            key=lambda ki_lambda_2: (sort_key_strings_hierarchically([ki_lambda_2.key_string])[0] if ki_lambda_2.key_string else "", ki_lambda_2.norm_path)
+            key=lambda ki_lambda_2: (get_sortable_parts_for_key(ki_lambda_2.key_string) if ki_lambda_2.key_string else [], ki_lambda_2.norm_path)
         )
 
     final_merged_last_grid_edit = f"Merged from {os.path.basename(primary_tracker_path)} and {os.path.basename(secondary_tracker_path)} on {datetime.datetime.now().isoformat()}"
@@ -863,7 +863,13 @@ def create_mini_tracker(
             found_module_as_ki = next((ki for ki in key_info_list_for_grid if ki.norm_path == norm_module_path), None)
             if found_module_as_ki: module_own_key_label = _get_display_key_for_tracker(found_module_as_ki, path_to_key_info_global, global_key_counts)
             
-            last_key_edit_message = f"Assigned keys: {', '.join(sort_key_strings_hierarchically(new_key_strings_for_this_tracker or []))}" if new_key_strings_for_this_tracker else \
+            # Use get_sortable_parts_for_key for correct sorting of keys in metadata message
+            sorted_new_keys_for_msg = sorted(
+                new_key_strings_for_this_tracker or [],
+                key=get_sortable_parts_for_key
+            )
+
+            last_key_edit_message = f"Assigned keys: {', '.join(sorted_new_keys_for_msg)}" if sorted_new_keys_for_msg else \
                                     (f"Initial key: {module_own_key_label}" if module_own_key_label else "Initial creation")
             f.write(f"last_KEY_edit: {last_key_edit_message}\n")
             f.write(f"last_GRID_edit: Initial creation\n\n")
@@ -953,6 +959,10 @@ def _load_ast_verified_links() -> List[Dict[str, str]]:
         return data
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from AST verified links file {ast_links_path}: {e}")
+        return [] # Corrected from pass to return []
+    except Exception as e: # Catch other potential errors like IOError
+        logger.error(f"Error loading AST verified links file {ast_links_path}: {e}", exc_info=True)
+        return []
 
 
 # --- End of Helper ---
@@ -1150,7 +1160,7 @@ def update_tracker(
 
     final_key_info_list = sorted(
         relevant_key_infos_for_type, 
-        key=lambda ki_lambda_sort: (sort_key_strings_hierarchically([ki_lambda_sort.key_string])[0] if ki_lambda_sort.key_string else "", ki_lambda_sort.norm_path)
+        key=lambda ki_lambda_sort: (get_sortable_parts_for_key(ki_lambda_sort.key_string) if ki_lambda_sort.key_string else [], ki_lambda_sort.norm_path)
     )
     if not final_key_info_list:
          logger.warning(f"{tracker_type.capitalize()} tracker '{os.path.basename(output_file)}' (for module: '{module_path_for_mini if tracker_type=='mini' else 'N/A'}') has 0 relevant key-path instances for its grid. May result in an empty tracker.")
@@ -1279,8 +1289,10 @@ def update_tracker(
         relevant_new_global_keys_in_this_tracker_strs: List[str] = []
         if new_keys: 
             paths_in_final_tracker_set = {ki.norm_path for ki in final_key_info_list}
-            relevant_new_global_keys_in_this_tracker_strs = sort_key_strings_hierarchically(
-                [nk.key_string for nk in new_keys if nk.norm_path in paths_in_final_tracker_set]
+            # Use get_sortable_parts_for_key for sorting
+            relevant_new_global_keys_in_this_tracker_strs = sorted(
+                [nk.key_string for nk in new_keys if nk.norm_path in paths_in_final_tracker_set],
+                key=get_sortable_parts_for_key 
             )
         
         last_key_edit_msg = f"Assigned keys: {', '.join(relevant_new_global_keys_in_this_tracker_strs)}" \
@@ -1346,8 +1358,9 @@ def update_tracker(
     relevant_new_global_keys_in_this_tracker_strs: List[str] = []
     if new_keys: 
         paths_in_final_tracker_set = {ki.norm_path for ki in final_key_info_list}
-        relevant_new_global_keys_in_this_tracker_strs = sort_key_strings_hierarchically(
-            [nk.key_string for nk in new_keys if nk.norm_path in paths_in_final_tracker_set]
+        relevant_new_global_keys_in_this_tracker_strs = sorted(
+            [nk.key_string for nk in new_keys if nk.norm_path in paths_in_final_tracker_set],
+            key=get_sortable_parts_for_key # MODIFIED
         )
     if relevant_new_global_keys_in_this_tracker_strs: 
         final_last_key_edit = f"Assigned keys: {', '.join(relevant_new_global_keys_in_this_tracker_strs)}"
@@ -1968,7 +1981,7 @@ def update_tracker(
                 final_key_info_list = [
                     ki for ki in original_final_key_info_list_before_pruning if ki.norm_path in paths_to_keep_after_pruning_set
                 ]
-                final_key_info_list.sort(key=lambda ki_sort: (sort_key_strings_hierarchically([ki_sort.key_string])[0] if ki_sort.key_string else "", ki_sort.norm_path))
+                final_key_info_list.sort(key=lambda ki_sort: (get_sortable_parts_for_key(ki_sort.key_string) if ki_sort.key_string else [], ki_sort.norm_path))
                 
                 new_grid_item_count = len(final_key_info_list) # Update count
                 
