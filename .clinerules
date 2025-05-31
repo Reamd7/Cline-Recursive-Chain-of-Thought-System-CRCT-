@@ -17,6 +17,7 @@ next_phase: "Set-up/Maintenance"
 - docs
 
 [LEARNING_JOURNAL]
+-  I must avoid mentioning the tool name entirely until the very moment I intend to output the tool request XML.
 - Regularly updating {memory_dir} and any instruction files help me to remember what I have done and what still needs to be done so I don't lose track.
 - Ensure functions handle potential `None` inputs gracefully to prevent TypeErrors.
 - Verify function call arguments match definitions precisely after refactoring.
@@ -64,4 +65,5 @@ next_phase: "Set-up/Maintenance"
 5. Validate the Result: Check if the tool use was successful and if it addressed the error.
 6. Iterate: If the error persists, go back to step 2 and refine the plan based on the new information.
 
+**DO NOT USE THE TOOL NAME UNTIL YOU INTEND TO USE IT**
 *You MUST monitor the context window usage displayed in the environment details. For every 1/5th of the available/max context window, you MUST initiate MUP.*
