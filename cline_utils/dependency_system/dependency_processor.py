@@ -17,11 +17,11 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 
 # --- Core Imports ---
 from cline_utils.dependency_system.core.dependency_grid import (
-    EMPTY_CHAR, PLACEHOLDER_CHAR, compress, decompress, get_char_at, set_char_at,
+    DIAGONAL_CHAR, EMPTY_CHAR, PLACEHOLDER_CHAR, compress, decompress, get_char_at, set_char_at,
     add_dependency_to_grid, get_dependencies_from_grid
 )
 from cline_utils.dependency_system.core.key_manager import (
-    KeyInfo, KeyGenerationError, load_old_global_key_map, validate_key, sort_key_strings_hierarchically,
+    KeyInfo, KeyGenerationError, get_sortable_parts_for_key, load_old_global_key_map, validate_key, sort_key_strings_hierarchically,
     load_global_key_map
 )
 
@@ -261,7 +261,8 @@ def handle_set_char(args: argparse.Namespace) -> int:
             tracker_type=tracker_type_val,
             suggestions_external=suggestions_for_set_char, 
             file_to_module=f_to_m_map,
-            force_apply_suggestions=True # Force this specific change
+            force_apply_suggestions=True, # Force this specific change
+            apply_ast_overrides=False # <<< MODIFIED/ADDED
         )
         print(f"Applied 'set_char' for source '{args.key}' targeting original column index {args.index} with char '{args.char}' "
               f"in {tracker_file_path} via forced update. VERIFY THE RESULT CAREFULLY in the tracker file.")
@@ -427,15 +428,15 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
 
     try:
         if suggestions_for_update_tracker: 
-            logger.info(f"Calling update_tracker for '{tracker_path}' with globally-instanced suggestions: {suggestions_for_update_tracker} (Force Apply: True)")
+            logger.info(f"Calling update_tracker for '{tracker_path}' with globally-instanced suggestions: {suggestions_for_update_tracker} (Force Apply: True, AST Overrides: False)")
             update_tracker( 
                 output_file_suggestion=tracker_path,
                 path_to_key_info=global_map, 
                 tracker_type=tracker_type_val_add,
                 suggestions_external=suggestions_for_update_tracker, 
                 file_to_module=file_to_module_map,
-                force_apply_suggestions=True 
-                # new_keys, keys_to_explicitly_remove, use_old_map_for_migration are not needed for simple add
+                force_apply_suggestions=True,
+                apply_ast_overrides=False # <<< MODIFIED/ADDED
             )
             print(f"Successfully processed dependency addition for tracker {tracker_path}.")
         else:
@@ -512,8 +513,11 @@ def handle_reset_config(args: argparse.Namespace) -> int:
     except Exception as e: logger.exception(f"Error reset_config: {e}"); print(f"Error: {e}"); return 1
 
 def handle_show_dependencies(args: argparse.Namespace) -> int:
-    """Handle the show-dependencies command using the contextual key system."""
-    user_provided_key_arg: str = args.key # This could be "KEY" or "KEY#GI"
+    """
+    Handle the show-dependencies command.
+    Shows all relationships for a given key, directly from each tracker file where it's defined or linked.
+    """
+    user_provided_key_arg: str = args.key
     logger.info(f"ShowDependencies: User requested dependencies for '{user_provided_key_arg}'")
     
     current_global_map = _load_global_map_or_exit() # path_to_key_info
@@ -524,102 +528,133 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     user_instance_num_to_show: Optional[int] = None
     if len(parts) > 1:
         try: user_instance_num_to_show = int(parts[1])
-        except ValueError: 
+        except ValueError:
             print(f"Error: Invalid instance number in key '{user_provided_key_arg}'. Use format KEY#num."); return 1
     
+    # Resolve the user-provided key to a specific KeyInfo object (target_ki_to_show)
+    # This target_ki_to_show's path and global instance string will be the focus.
     target_ki_to_show = get_globally_resolved_key_info_for_cli(
         base_key_to_show, user_instance_num_to_show, current_global_map, "display"
     )
     if not target_ki_to_show:
-        return 1 # Error already printed by helper if ambiguous or not found
+        return 1
 
     target_key_gi_str_to_show = get_key_global_instance_string(target_ki_to_show, current_global_map)
-    if not target_key_gi_str_to_show: # Should not happen if target_ki_to_show is valid
+    if not target_key_gi_str_to_show:
         print(f"Error: Could not determine global instance string for resolved KeyInfo {target_ki_to_show}."); return 1
 
-    print(f"\n--- Aggregated Dependencies for: {target_key_gi_str_to_show} (Path: {target_ki_to_show.norm_path}) ---")
+    print(f"\n--- Dependencies for: {target_key_gi_str_to_show} (Path: {target_ki_to_show.norm_path}) ---")
     
     # Pre-calculate global counts for display formatting
     global_key_string_counts = defaultdict(int)
     for ki_count in current_global_map.values():
         global_key_string_counts[ki_count.key_string] += 1
 
-    # --- Aggregation now returns KEY#GI links ---
-    # Ensure path_migration_info is built correctly for aggregate_all_dependencies
-    old_global_map_val_show = load_old_global_key_map()
-    path_migration_info_show: PathMigrationInfo = _build_path_migration_map(old_global_map_val_show, current_global_map)
-    
-    all_tracker_paths_show = find_all_tracker_paths(config, project_root) # from tracker_utils
-    
-    aggregated_links_instance_specific = aggregate_all_dependencies( 
-        all_tracker_paths_show, 
-        path_migration_info_show,
-        current_global_map 
-    )
-    
-    all_deps_by_type_disp = defaultdict(list) 
-    # --- Use a set to track (display_char, dependency_gi_str) pairs already added ---
-    added_dep_tuples_for_display_char: Dict[str, Set[str]] = defaultdict(set)
-    origin_map_disp = defaultdict(set) # CORRECTED INITIALIZATION
+    all_tracker_paths = find_all_tracker_paths(config, project_root)
 
-    for (src_gi_link, tgt_gi_link), (char, origs) in aggregated_links_instance_specific.items():
-        display_char = char
-        dependency_gi_str: Optional[str] = None
-        
-        if src_gi_link == target_key_gi_str_to_show: 
-            dependency_gi_str = tgt_gi_link
-        elif tgt_gi_link == target_key_gi_str_to_show: 
-            dependency_gi_str = src_gi_link
-            display_char = {'<':'>', '>':'<','x':'x','d':'d','s':'s','S':'S','p':'p','n':'n'}.get(char, char) 
-        
-        if dependency_gi_str:
-            # Check if this (display_char, dependency_gi_str) has already been processed and added
-            if dependency_gi_str in added_dep_tuples_for_display_char[display_char]:
-                if display_char in ('p','s','S'): 
-                     origin_map_disp[(display_char, dependency_gi_str)].update(origs)
-                continue # Already added this dependency for this display_char type
+    # Structure: Dict[char_type, Dict[interacting_key_gi_str, List[origin_tracker_basename]]]
+    all_deps_by_char_type_and_origin: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+    # Outer key: char_type (e.g. 'p', 'n', 'x')
+    # Inner key: interacting_key_gi_str (e.g. '1Bc4#1')
+    # Value: List of origin tracker basenames (e.g. ['database_module.md', 'config_module.md'])
 
-            dep_ki = resolve_key_global_instance_to_ki(dependency_gi_str, current_global_map)
-            dep_p_str = dep_ki.norm_path if dep_ki else "PATH_UNKNOWN_FOR_GI_STR"
+    for tracker_path in all_tracker_paths:
+        logger.debug(f"ShowDeps: Processing tracker '{os.path.basename(tracker_path)}' for key '{target_key_gi_str_to_show}'")
+        try:
+            with open(tracker_path, 'r', encoding='utf-8') as f_tracker:
+                lines = f_tracker.readlines()
+
+            defs_in_this_tracker = read_key_definitions_from_lines(lines)
+            _grid_hdrs, grid_rows_in_this_tracker = read_grid_from_lines(lines)
+
+            if not defs_in_this_tracker or not grid_rows_in_this_tracker:
+                logger.debug(f"  Skipping tracker {os.path.basename(tracker_path)}: no definitions or grid rows found.")
+                continue
+
+            # Create a mapping from path_str_in_file to its index in this tracker's definitions
+            path_to_idx_in_this_tracker: Dict[str, int] = {}
+            # Also, map path_str_in_file to its original key_label_in_file for reverse lookups
+            path_to_key_label_in_this_tracker: Dict[str, str] = {}
+
+            for i, (k_label, p_str) in enumerate(defs_in_this_tracker):
+                if p_str not in path_to_idx_in_this_tracker: # First occurrence if path duplicated in defs
+                    path_to_idx_in_this_tracker[p_str] = i
+                    path_to_key_label_in_this_tracker[p_str] = k_label
             
-            # Prepare display string for the dependency, adding #GI if its base key is duplicated globally
-            dep_base_key_str = dependency_gi_str.split('#')[0]
-            dep_display_name = dependency_gi_str 
-            if global_key_string_counts.get(dep_base_key_str, 0) <= 1: 
-                dep_display_name = dep_base_key_str 
+            # Check if our target_ki_to_show.norm_path is defined in this tracker
+            source_row_idx_in_this_tracker = path_to_idx_in_this_tracker.get(target_ki_to_show.norm_path)
 
-            all_deps_by_type_disp[display_char].append((dep_display_name, dep_p_str, dependency_gi_str))
-            added_dep_tuples_for_display_char[display_char].add(dependency_gi_str) 
-            
-            if display_char in ('p','s','S'): 
-                origin_map_disp[(display_char, dependency_gi_str)].update(origs)
+            # 1. Process outgoing relationships (target_ki_to_show is the source)
+            if source_row_idx_in_this_tracker is not None and source_row_idx_in_this_tracker < len(grid_rows_in_this_tracker):
+                row_label_from_grid, compressed_row_data = grid_rows_in_this_tracker[source_row_idx_in_this_tracker]
+                
+                # Sanity check: row_label from grid should match the key_label from definitions for this path
+                expected_row_label = path_to_key_label_in_this_tracker.get(target_ki_to_show.norm_path)
+                if row_label_from_grid != expected_row_label:
+                    logger.warning(f"  Label mismatch in {os.path.basename(tracker_path)} for path {target_ki_to_show.norm_path}. Def label: {expected_row_label}, Grid row label: {row_label_from_grid}. Proceeding cautiously.")
 
-    output_sections_disp = [("Mutual ('x')",'x'),("Doc ('d')",'d'),("Semantic ('S')",'S'),
-                            ("Semantic ('s')",'s'),("Depends On ('<')",'<'),
-                            ("Depended On By ('>')",'>'),("Placeholder ('p')",'p')]
-    
+                decomp_row = decompress(compressed_row_data)
+                if len(decomp_row) != len(defs_in_this_tracker):
+                    logger.warning(f"  Row length mismatch in {os.path.basename(tracker_path)} for source {row_label_from_grid}. Expected {len(defs_in_this_tracker)}, got {len(decomp_row)}. Skipping row.")
+                else:
+                    for col_idx, char_val in enumerate(decomp_row):
+                        if char_val == DIAGONAL_CHAR or char_val == EMPTY_CHAR:
+                            continue
+                        
+                        # Get path of the item at col_idx from this tracker's definitions
+                        if col_idx < len(defs_in_this_tracker):
+                            interacting_item_path_in_tracker = defs_in_this_tracker[col_idx][1]
+                            interacting_item_ki_global = current_global_map.get(interacting_item_path_in_tracker)
+                            if interacting_item_ki_global:
+                                interacting_item_gi_str = get_key_global_instance_string(interacting_item_ki_global, current_global_map)
+                                if interacting_item_gi_str:
+                                    all_deps_by_char_type_and_origin[char_val][interacting_item_gi_str].append(os.path.basename(tracker_path))
+            # else:
+                # logger.debug(f"  Key {target_key_gi_str_to_show} (path {target_ki_to_show.norm_path}) not found as a row source in {os.path.basename(tracker_path)} or grid data missing.")
+
+
+        except Exception as e_tracker_proc:
+            logger.error(f"Error processing tracker {os.path.basename(tracker_path)} for show-dependencies: {e_tracker_proc}", exc_info=True)
+
+    # --- Displaying the collected results ---
+    output_sections_disp = [
+        ("Mutual ('x')", 'x'), ("Doc ('d')", 'd'),
+        ("Semantic ('S')", 'S'), ("Semantic ('s')", 's'),
+        ("Depends On ('<')", '<'), ("Depended On By ('>')", '>'),
+        ("Placeholder ('p')", 'p')
+        # "No Dependency ('n')" section is intentionally omitted from display
+    ]
+
     for title, char_filter in output_sections_disp:
         print(f"\n{title}:")
-        # Sort dependencies: first by base key string (hierarchically), then by global instance num
-        dep_list_for_char = sorted(
-            all_deps_by_type_disp.get(char_filter, []), 
-            key=lambda item: (
-                sort_key_strings_hierarchically([item[0].split('#')[0]])[0], 
-                int(item[0].split('#')[1]) if '#' in item[0] else 0 
-            )
-        )
-        
-        if dep_list_for_char:
-            for disp_name, dp, full_gi_str_dep in dep_list_for_char:
-                orig_str = ""
-                if char_filter in ('p','s','S'): 
-                    origins_val = origin_map_disp.get((char_filter, full_gi_str_dep), set())
-                    if origins_val: 
-                        orig_str = f" (In: {', '.join(sorted([os.path.basename(p_orig) for p_orig in origins_val]))})"
-                print(f"  - {disp_name}: {dp}{orig_str}")
-        else: 
+
+        deps_for_this_char = all_deps_by_char_type_and_origin.get(char_filter, {})
+        if not deps_for_this_char:
             print("  None")
-            
+            continue
+
+        sorted_interacting_keys_gi = sorted(
+            deps_for_this_char.keys(),
+            key=lambda k_gi_str: get_sortable_parts_for_key(k_gi_str)
+        )
+
+        for interacting_key_gi in sorted_interacting_keys_gi:
+            interacting_ki = resolve_key_global_instance_to_ki(interacting_key_gi, current_global_map)
+            if not interacting_ki: # Should not happen if GI string is valid
+                print(f"  - {interacting_key_gi}: PATH_UNKNOWN (Error resolving GI string)")
+                continue
+
+            # Prepare display name for the interacting key (use base key if not globally duplicated)
+            interacting_base_key = interacting_key_gi.split('#')[0]
+            display_name_interacting = interacting_key_gi
+            if global_key_string_counts.get(interacting_base_key, 0) <= 1:
+                display_name_interacting = interacting_base_key
+
+            origin_trackers_list = sorted(list(set(deps_for_this_char[interacting_key_gi])))
+            origins_str = f" (In: {', '.join(origin_trackers_list)})" if origin_trackers_list else ""
+
+            print(f"  - {display_name_interacting}: {interacting_ki.norm_path}{origins_str}")
+
     print("\n------------------------------------------")
     return 0
 

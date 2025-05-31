@@ -976,7 +976,8 @@ def update_tracker(
     new_keys: Optional[List[KeyInfo]] = None, 
     force_apply_suggestions: bool = False,
     keys_to_explicitly_remove: Optional[Set[str]] = None, 
-    use_old_map_for_migration: bool = True
+    use_old_map_for_migration: bool = True,
+    apply_ast_overrides: bool = True
 ) -> None: # Returns None, modifies files directly.
     """
     Updates or creates a tracker file based on type using contextual keys.
@@ -985,13 +986,12 @@ def update_tracker(
     Calls tracker-specific logic for filtering, aggregation (main), and path determination.
     Uses hierarchical sorting for key strings.
     """
-    logger.info(f"--- update_tracker CALLED (Std Global Instance Mode) --- Suggestion: '{output_file_suggestion}', Type: '{tracker_type}', ForceSugg: {force_apply_suggestions}")
-
+    logger.info(f"--- update_tracker CALLED --- Suggestion: '{output_file_suggestion}', Type: '{tracker_type}', ForceSugg: {force_apply_suggestions}, ApplyAST: {apply_ast_overrides}")
     # --- Initialize counters and flags ---
     project_root = get_project_root()
     config = ConfigManager()
     get_priority = config.get_char_priority
-    min_positive_priority = max(2, get_priority('s')) 
+    min_positive_priority = max(2, get_priority('s'))
     abs_doc_roots_set = {normalize_path(os.path.join(project_root, p)) for p in config.get_doc_directories()}
 
     # Mini-tracker import counters/flags
@@ -1012,6 +1012,12 @@ def update_tracker(
     module_path_for_mini: str = "" 
     relevant_key_infos_for_type: List[KeyInfo] = [] 
     suggestions_to_process_for_this_tracker: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    any_forced_suggestion_processed_for_metadata = False # For Stage 1
+    ast_overrides_applied_count = 0
+    # Precompute global key counts for _get_display_key_for_tracker if used for metadata messages
+    global_key_counts_for_update_tracker = defaultdict(int)
+    for ki_global_counts in path_to_key_info.values():
+        global_key_counts_for_update_tracker[ki_global_counts.key_string] += 1
 
     # --- 1. Type-Specific Logic Block ---
     if tracker_type == "main":
@@ -1619,19 +1625,18 @@ def update_tracker(
 
         # 1. Native <-> Foreign relationships
         for native_ki in native_ki_in_current_tracker:
-            native_idx_in_current = final_path_to_new_idx[native_ki.norm_path] # Index in current tracker's grid
+            native_idx_in_current = final_path_to_new_idx.get(native_ki.norm_path)
+            if native_idx_in_current is None: continue
 
             for foreign_ki in foreign_ki_in_current_tracker:
-                foreign_idx_in_current = final_path_to_new_idx[foreign_ki.norm_path]
+                foreign_idx_in_current = final_path_to_new_idx.get(foreign_ki.norm_path)
+                if foreign_idx_in_current is None: continue
                 
                 home_tracker_file_of_foreign: Optional[str] = None
                 if is_path_in_doc_roots_local(foreign_ki.norm_path):
                     home_tracker_file_of_foreign = get_tracker_path(project_root, "doc")
-                elif foreign_ki.parent_path: 
-                    # Check if the foreign item's parent itself has a mini-tracker
-                    # and is not the current module_path_for_mini to avoid self-referential lookups if parent is somehow foreign.
-                    if foreign_ki.parent_path != module_path_for_mini :
-                        home_tracker_file_of_foreign = get_mini_tracker_path(foreign_ki.parent_path)
+                elif foreign_ki.parent_path and foreign_ki.parent_path != module_path_for_mini:
+                    home_tracker_file_of_foreign = get_mini_tracker_path(foreign_ki.parent_path)
                 
                 if home_tracker_file_of_foreign and home_tracker_file_of_foreign != output_file: # Not self
                     # Path N -> Path F in Foreign's Home Tracker
@@ -1640,20 +1645,20 @@ def update_tracker(
                     char_fn_in_home = get_char_from_home_tracker_cached(foreign_ki.norm_path, native_ki.norm_path, home_tracker_file_of_foreign)
 
                     # Update current grid's N->F cell
-                    if char_nf_in_home and char_nf_in_home != PLACEHOLDER_CHAR:
+                    if char_nf_in_home and char_nf_in_home not in (PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR): # Ignore 'p', '.', 'o' from home
                         current_char_nf = temp_decomp_grid_rows[native_idx_in_current][foreign_idx_in_current]
                         if get_priority(char_nf_in_home) > get_priority(current_char_nf) or \
-                           (char_nf_in_home == 'n' and current_char_nf in ('p','s','S')): # 'n' from authoritative source can override weak links
+                           (char_nf_in_home == 'n' and current_char_nf in (PLACEHOLDER_CHAR, 's', 'S')):
                             if temp_decomp_grid_rows[native_idx_in_current][foreign_idx_in_current] != char_nf_in_home:
                                 logger.debug(f"    Import N->F: Updating {native_ki.norm_path} -> {foreign_ki.norm_path} from '{current_char_nf}' to '{char_nf_in_home}' (from {os.path.basename(home_tracker_file_of_foreign)})")
                                 temp_decomp_grid_rows[native_idx_in_current][foreign_idx_in_current] = char_nf_in_home
                                 native_foreign_import_ct+=1; grid_content_changed_by_imports = True
                     
                     # Update current grid's F->N cell
-                    if char_fn_in_home and char_fn_in_home != PLACEHOLDER_CHAR:
+                    if char_fn_in_home and char_fn_in_home not in (PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR): # Ignore 'p', '.', 'o' from home
                         current_char_fn = temp_decomp_grid_rows[foreign_idx_in_current][native_idx_in_current]
                         if get_priority(char_fn_in_home) > get_priority(current_char_fn) or \
-                           (char_fn_in_home == 'n' and current_char_fn in ('p','s','S')):
+                           (char_fn_in_home == 'n' and current_char_fn in (PLACEHOLDER_CHAR, 's', 'S')):
                             if temp_decomp_grid_rows[foreign_idx_in_current][native_idx_in_current] != char_fn_in_home:
                                 logger.debug(f"    Import F->N: Updating {foreign_ki.norm_path} -> {native_ki.norm_path} from '{current_char_fn}' to '{char_fn_in_home}' (from {os.path.basename(home_tracker_file_of_foreign)})")
                                 temp_decomp_grid_rows[foreign_idx_in_current][native_idx_in_current] = char_fn_in_home
@@ -1665,11 +1670,13 @@ def update_tracker(
         # 2. Foreign <-> Foreign relationships (if they share a common home tracker different from current)
         for i in range(len(foreign_ki_in_current_tracker)):
             f_ki1 = foreign_ki_in_current_tracker[i]
-            f_idx1_in_current = final_path_to_new_idx[f_ki1.norm_path] # Index in current tracker's grid
+            f_idx1_in_current = final_path_to_new_idx.get(f_ki1.norm_path)
+            if f_idx1_in_current is None: continue
 
             for j in range(i + 1, len(foreign_ki_in_current_tracker)): # Avoid self-comparison and duplicates
                 f_ki2 = foreign_ki_in_current_tracker[j]
-                f_idx2_in_current = final_path_to_new_idx[f_ki2.norm_path]
+                f_idx2_in_current = final_path_to_new_idx.get(f_ki2.norm_path)
+                if f_idx2_in_current is None: continue
 
                 common_home_tracker: Optional[str] = None
                 is_fki1_doc = is_path_in_doc_roots_local(f_ki1.norm_path)
@@ -1678,9 +1685,9 @@ def update_tracker(
                 if is_fki1_doc and is_fki2_doc: # Both are doc items
                     common_home_tracker = get_tracker_path(project_root, "doc")
                 elif not is_fki1_doc and not is_fki2_doc and \
-                     f_ki1.parent_path and f_ki1.parent_path == f_ki2.parent_path: # Both in same other module
-                    if f_ki1.parent_path != module_path_for_mini: # Ensure common parent is not current module
-                         common_home_tracker = get_mini_tracker_path(f_ki1.parent_path)
+                     f_ki1.parent_path and f_ki1.parent_path == f_ki2.parent_path and \
+                     f_ki1.parent_path != module_path_for_mini:
+                    common_home_tracker = get_mini_tracker_path(f_ki1.parent_path)
                 
                 if common_home_tracker and common_home_tracker != output_file: # Not self
                     # Path F1 -> Path F2 in their common home
@@ -1688,170 +1695,162 @@ def update_tracker(
                     # Path F2 -> Path F1 in their common home
                     char_f2f1_in_home = get_char_from_home_tracker_cached(f_ki2.norm_path, f_ki1.norm_path, common_home_tracker)
 
-                    # Update current grid's F1->F2 cell
-                    # Auto-'n' logic for F-F links: if current is placeholder AND home has no specific link, set to 'n'.
-                    current_char_f1f2 = temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current]
-                    final_char_f1f2 = current_char_f1f2
-                    if char_f1f2_in_home and char_f1f2_in_home != PLACEHOLDER_CHAR:
-                        if get_priority(char_f1f2_in_home) > get_priority(current_char_f1f2) or \
-                           (char_f1f2_in_home == 'n' and current_char_f1f2 in ('p','s','S')):
-                           final_char_f1f2 = char_f1f2_in_home
-                    elif current_char_f1f2 == PLACEHOLDER_CHAR: # No specific link in home, current is placeholder
-                        final_char_f1f2 = 'n' # Default to 'n' for unlinked foreign-foreign
+                    # --- Apply to F1 -> F2 cell in current mini tracker ---
+                    current_char_f1f2_in_mini = temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current]
+                    final_char_to_set_f1f2 = current_char_f1f2_in_mini
 
-                    if temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current] != final_char_f1f2:
-                        logger.debug(f"    Import F->F: Updating {f_ki1.norm_path} -> {f_ki2.norm_path} from '{current_char_f1f2}' to '{final_char_f1f2}' (from {os.path.basename(common_home_tracker)})")
-                        temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current] = final_char_f1f2
+                    if char_f1f2_in_home and char_f1f2_in_home not in (PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR):
+                        # Home has a meaningful, non-placeholder/empty/diagonal link
+                        if get_priority(char_f1f2_in_home) > get_priority(current_char_f1f2_in_mini) or \
+                           current_char_f1f2_in_mini == PLACEHOLDER_CHAR:
+                            final_char_to_set_f1f2 = char_f1f2_in_home
+                    elif (char_f1f2_in_home is None or char_f1f2_in_home == EMPTY_CHAR) and \
+                         current_char_f1f2_in_mini == PLACEHOLDER_CHAR:
+                        # Home has no link or empty link, and current mini is placeholder -> default to 'n'
+                        final_char_to_set_f1f2 = 'n'
+                    # If char_f1f2_in_home is PLACEHOLDER_CHAR, it's ignored, final_char_to_set_f1f2 remains current_char_f1f2_in_mini
+
+                    if temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current] != final_char_to_set_f1f2:
+                        logger.debug(f"    Import F1->F2: Updating {f_ki1.key_string} -> {f_ki2.key_string} from '{current_char_f1f2_in_mini}' to '{final_char_to_set_f1f2}' (Home char: {char_f1f2_in_home})")
+                        temp_decomp_grid_rows[f_idx1_in_current][f_idx2_in_current] = final_char_to_set_f1f2
                         foreign_foreign_import_ct+=1; grid_content_changed_by_imports = True
 
-                    # Update current grid's F2->F1 cell
-                    current_char_f2f1 = temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current]
-                    final_char_f2f1 = current_char_f2f1
-                    if char_f2f1_in_home and char_f2f1_in_home != PLACEHOLDER_CHAR:
-                        if get_priority(char_f2f1_in_home) > get_priority(current_char_f2f1) or \
-                           (char_f2f1_in_home == 'n' and current_char_f2f1 in ('p','s','S')):
-                           final_char_f2f1 = char_f2f1_in_home
-                    elif current_char_f2f1 == PLACEHOLDER_CHAR:
-                        final_char_f2f1 = 'n'
+                    # --- Apply to F2 -> F1 cell in current mini tracker (symmetrical logic) ---
+                    current_char_f2f1_in_mini = temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current]
+                    final_char_to_set_f2f1 = current_char_f2f1_in_mini
 
-                    if temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current] != final_char_f2f1:
-                        logger.debug(f"    Import F->F: Updating {f_ki2.norm_path} -> {f_ki1.norm_path} from '{current_char_f2f1}' to '{final_char_f2f1}' (from {os.path.basename(common_home_tracker)})")
-                        temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current] = final_char_f2f1
+                    if char_f2f1_in_home and char_f2f1_in_home not in (PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR):
+                        if get_priority(char_f2f1_in_home) > get_priority(current_char_f2f1_in_mini) or \
+                           current_char_f2f1_in_mini == PLACEHOLDER_CHAR:
+                            final_char_to_set_f2f1 = char_f2f1_in_home
+                    elif (char_f2f1_in_home is None or char_f2f1_in_home == EMPTY_CHAR) and \
+                         current_char_f2f1_in_mini == PLACEHOLDER_CHAR:
+                        final_char_to_set_f2f1 = 'n'
+                    
+                    if temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current] != final_char_to_set_f2f1:
+                        logger.debug(f"    Import F2->F1: Updating {f_ki2.key_string} -> {f_ki1.key_string} from '{current_char_f2f1_in_mini}' to '{final_char_to_set_f2f1}' (Home char: {char_f2f1_in_home})")
+                        temp_decomp_grid_rows[f_idx2_in_current][f_idx1_in_current] = final_char_to_set_f2f1
                         foreign_foreign_import_ct+=1; grid_content_changed_by_imports = True
         if foreign_foreign_import_ct > 0:
             logger.info(f"  Import: {foreign_foreign_import_ct} foreign <-> foreign relationships potentially updated.")
     
     # --- Apply Suggestions (from suggestions_to_process_for_this_tracker, which is KEY#global_instance) ---
-    suggestion_applied_flag = False 
-    applied_manual_source_path: Optional[str] = None # For last_grid_edit metadata if forced
-    applied_manual_target_paths: List[Tuple[str,str]] = [] # List of (key_str, path_str) for metadata
-    applied_manual_dep_type: Optional[str] = None # For metadata
+    # suggestion_applied_flag = False 
+    # applied_manual_source_path: Optional[str] = None # For last_grid_edit metadata if forced
+    # applied_manual_target_paths: List[Tuple[str,str]] = [] # List of (key_str, path_str) for metadata
+    # applied_manual_dep_type: Optional[str] = None # For metadata
 
     globally_instanced_suggestions_to_apply = suggestions_to_process_for_this_tracker
+    ast_overrides_applied_count = 0 # Initialize here for clarity
 
     if globally_instanced_suggestions_to_apply:
         logger.info(f"Applying {sum(len(v) for v in globally_instanced_suggestions_to_apply.values())} globally-instanced suggestions to grid for '{os.path.basename(output_file)}' (Force Apply: {force_apply_suggestions})")
         
+        # This flag tracks if any forced suggestion was "actioned" enough to update metadata and potentially the timestamp
+        any_forced_suggestion_processed_for_metadata = False 
+
         for src_key_global_instance_str, deps_sugg_list_global in globally_instanced_suggestions_to_apply.items():
             source_ki_globally_resolved = resolve_key_global_instance_to_ki(src_key_global_instance_str, path_to_key_info)
-            
             if not source_ki_globally_resolved:
-                logger.warning(f"ApplySugg: Could not resolve source suggestion '{src_key_global_instance_str}' globally. Skipping all its dependencies.")
+                logger.warning(f"ApplySugg: Could not resolve source suggestion '{src_key_global_instance_str}' globally. Skipping.")
                 continue
-
             src_local_idx = final_path_to_new_idx.get(source_ki_globally_resolved.norm_path)
-            
             if src_local_idx is None:
-                logger.warning(f"ApplySugg: Source item {source_ki_globally_resolved.key_string} (Path: {source_ki_globally_resolved.norm_path}) from sugg '{src_key_global_instance_str}' is not in current structure of tracker '{os.path.basename(output_file)}'. Skipping suggestions from it.")
+                logger.debug(f"ApplySugg: Source '{src_key_global_instance_str}' (Path: {source_ki_globally_resolved.norm_path}) not in current tracker structure '{os.path.basename(output_file)}'. Skipping.")
                 continue
-            
             src_ki_in_this_tracker = final_key_info_list[src_local_idx]
-            logger.debug(f"ApplySugg: Processing suggestions for source: {src_ki_in_this_tracker.key_string} (local_idx {src_local_idx}, path: {src_ki_in_this_tracker.norm_path}) (resolved from global: '{src_key_global_instance_str}')")
 
             for tgt_key_global_instance_str, dep_char_sugg in deps_sugg_list_global:
                 target_ki_globally_resolved = resolve_key_global_instance_to_ki(tgt_key_global_instance_str, path_to_key_info)
                 if not target_ki_globally_resolved:
-                    logger.warning(f"ApplySugg: Could not resolve target suggestion '{tgt_key_global_instance_str}' globally (for source '{src_key_global_instance_str}'). Skipping this specific target.")
+                    logger.warning(f"ApplySugg: Could not resolve target '{tgt_key_global_instance_str}' for source '{src_key_global_instance_str}'. Skipping.")
                     continue
-                
                 tgt_local_idx = final_path_to_new_idx.get(target_ki_globally_resolved.norm_path)
-                if tgt_local_idx is None:
-                    logger.warning(f"ApplySugg: Target item {target_ki_globally_resolved.key_string} (Path: {target_ki_globally_resolved.norm_path}) from sugg '{tgt_key_global_instance_str}' is not in current structure of tracker '{os.path.basename(output_file)}'. Skipping this specific dependency.")
+                if tgt_local_idx is None or src_local_idx == tgt_local_idx:
+                    logger.debug(f"ApplySugg: Target '{tgt_key_global_instance_str}' (Path: {target_ki_globally_resolved.norm_path}) not in tracker or self-link. Skipping.")
                     continue
-                
-                if src_local_idx == tgt_local_idx: 
-                    logger.debug(f"  ApplySugg: Skipping self-link for {src_ki_in_this_tracker.key_string} (local_idx {src_local_idx}) based on identical local indices.")
-                    continue
-
                 tgt_ki_in_this_tracker = final_key_info_list[tgt_local_idx]
-                logger.debug(f"  ApplySugg: Attempting to apply '{dep_char_sugg}' from '{src_ki_in_this_tracker.key_string}' to target: {tgt_ki_in_this_tracker.key_string} (local_idx {tgt_local_idx}, path: {tgt_ki_in_this_tracker.norm_path}) (resolved from global: '{tgt_key_global_instance_str}')")
 
-                existing_char = temp_decomp_grid_rows[src_local_idx][tgt_local_idx]
-                should_apply_suggestion_logic = False
-                final_char_to_apply = dep_char_sugg
-                upgrade_to_x = False # Flag if this specific interaction results in 'x'
+                existing_char_in_grid = temp_decomp_grid_rows[src_local_idx][tgt_local_idx]
+                final_char_to_set_in_grid = dep_char_sugg 
+                
+                is_upgraded_to_x_this_link = False
+                if final_char_to_set_in_grid in ('<', '>'):
+                    char_in_reverse_cell = temp_decomp_grid_rows[tgt_local_idx][src_local_idx]
+                    if (final_char_to_set_in_grid == '>' and char_in_reverse_cell == '<') or \
+                       (final_char_to_set_in_grid == '<' and char_in_reverse_cell == '>'):
+                        logger.debug(f"    Mutual dependency formed for {src_ki_in_this_tracker.norm_path} <-> {tgt_ki_in_this_tracker.norm_path}. Upgrading to 'x'.")
+                        final_char_to_set_in_grid = 'x'
+                        is_upgraded_to_x_this_link = True
+                        if temp_decomp_grid_rows[tgt_local_idx][src_local_idx] != 'x':
+                            temp_decomp_grid_rows[tgt_local_idx][src_local_idx] = 'x'
+                            suggestion_applied_flag = True 
 
-                # Determine if the suggestion should be applied
+                apply_this_suggestion_to_cell = False
                 if force_apply_suggestions:
-                    if dep_char_sugg != PLACEHOLDER_CHAR and existing_char != dep_char_sugg: # Apply if different and not placeholder
-                        should_apply_suggestion_logic = True
-                        logger.debug(f"    Force apply: '{dep_char_sugg}' will attempt to overwrite '{existing_char}' for {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path}")
-                elif existing_char == PLACEHOLDER_CHAR and dep_char_sugg != PLACEHOLDER_CHAR: # Apply if target is placeholder
-                    should_apply_suggestion_logic = True
-                elif existing_char != 'n': # Only consider overriding if existing is not 'n' (verified no dependency)
+                    if dep_char_sugg != PLACEHOLDER_CHAR: 
+                        apply_this_suggestion_to_cell = True
+                        any_forced_suggestion_processed_for_metadata = True # Mark that a forced suggestion was intended
+                        logger.debug(f"    Force apply active for: {src_ki_in_this_tracker.key_string} -> {tgt_ki_in_this_tracker.key_string} with '{final_char_to_set_in_grid}' (current: '{existing_char_in_grid}')")
+                elif existing_char_in_grid == PLACEHOLDER_CHAR and final_char_to_set_in_grid != PLACEHOLDER_CHAR:
+                    apply_this_suggestion_to_cell = True
+                elif existing_char_in_grid != 'n': 
                     try:
-                        if get_priority(dep_char_sugg) > get_priority(existing_char):
-                            should_apply_suggestion_logic = True
-                            logger.info(f"    Applying stronger suggestion '{dep_char_sugg}' (Prio: {get_priority(dep_char_sugg)}) over existing '{existing_char}' (Prio: {get_priority(existing_char)}) for {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path}")
-                    except KeyError: # Should not happen with valid chars
-                        logger.warning(f"    Priority lookup failed for '{dep_char_sugg}' or '{existing_char}'. Skipping override check.")
+                        if get_priority(final_char_to_set_in_grid) > get_priority(existing_char_in_grid):
+                            apply_this_suggestion_to_cell = True
+                            logger.info(f"    Applying stronger suggestion '{final_char_to_set_in_grid}' over '{existing_char_in_grid}' for {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path}")
+                    except KeyError:
+                        logger.warning(f"    Priority lookup failed for '{final_char_to_set_in_grid}' or '{existing_char_in_grid}'.")
                 
-                if should_apply_suggestion_logic:
-                    applied_this_specific_link = False # Track if this specific cell was changed by this suggestion
-                    # Check for mutual '<' or '>' needing 'x' upgrade
-                    if final_char_to_apply in ('<', '>'): # Use final_char_to_apply as it might change to 'x'
-                        char_in_reverse_cell = temp_decomp_grid_rows[tgt_local_idx][src_local_idx]
-                        if char_in_reverse_cell == final_char_to_apply : # e.g. A->B is > and B->A is also >
-                            logger.debug(f"    Mutual dependency detected ({final_char_to_apply}). Upgrading to 'x' for {src_ki_in_this_tracker.norm_path} <-> {tgt_ki_in_this_tracker.norm_path}.")
-                            final_char_to_apply = 'x' # Upgrade char for current cell
-                            if temp_decomp_grid_rows[tgt_local_idx][src_local_idx] != 'x': # Update reverse immediately
-                                temp_decomp_grid_rows[tgt_local_idx][src_local_idx] = 'x'
-                                suggestion_applied_flag = True # Overall grid changed
-                                applied_this_specific_link = True # This specific interaction caused a change
-                            upgrade_to_x = True # Mark that 'x' was set
-
-                    # Apply the final character to current cell if different
-                    if temp_decomp_grid_rows[src_local_idx][tgt_local_idx] != final_char_to_apply:
-                        temp_decomp_grid_rows[src_local_idx][tgt_local_idx] = final_char_to_apply
-                        suggestion_applied_flag = True
-                        applied_this_specific_link = True
-                        logger.debug(f"    Applied to grid: {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path} = '{final_char_to_apply}'")
-
-                    # Handle simple reciprocal if not upgraded to 'x'
-                    if not upgrade_to_x:
-                        reciprocal_char_sugg_val: Optional[str] = None
-                        if final_char_to_apply == '>': reciprocal_char_sugg_val = '<'
-                        elif final_char_to_apply == '<': reciprocal_char_sugg_val = '>'
-                        
-                        if reciprocal_char_sugg_val:
-                            existing_char_in_reverse = temp_decomp_grid_rows[tgt_local_idx][src_local_idx]
-                            apply_reciprocal_flag = False
-                            if force_apply_suggestions:
-                                if existing_char_in_reverse != 'x' and existing_char_in_reverse != reciprocal_char_sugg_val:
-                                    apply_reciprocal_flag = True
-                            else: # Not forcing, apply if placeholder or reciprocal is stronger (and existing not 'n')
-                                if existing_char_in_reverse == PLACEHOLDER_CHAR or \
-                                   (existing_char_in_reverse != 'n' and get_priority(reciprocal_char_sugg_val) > get_priority(existing_char_in_reverse)):
-                                    apply_reciprocal_flag = True
-                            
-                            if apply_reciprocal_flag:
-                                if temp_decomp_grid_rows[tgt_local_idx][src_local_idx] != reciprocal_char_sugg_val:
-                                    temp_decomp_grid_rows[tgt_local_idx][src_local_idx] = reciprocal_char_sugg_val
-                                    suggestion_applied_flag = True
-                                    applied_this_specific_link = True
-                                    logger.debug(f"    Reciprocal Applied: {tgt_ki_in_this_tracker.norm_path} -> {src_ki_in_this_tracker.norm_path} = '{reciprocal_char_sugg_val}'")
+                if apply_this_suggestion_to_cell:
+                    if temp_decomp_grid_rows[src_local_idx][tgt_local_idx] != final_char_to_set_in_grid:
+                        temp_decomp_grid_rows[src_local_idx][tgt_local_idx] = final_char_to_set_in_grid
+                        suggestion_applied_flag = True 
+                        logger.debug(f"    Applied to grid (forward): {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path} = '{final_char_to_set_in_grid}'")
                     
-                    # Update metadata for forced manual changes if a change actually occurred for this link
-                    if force_apply_suggestions and applied_this_specific_link:
+                    # Populate metadata if forced (even if char was same)
+                    if force_apply_suggestions:
                         if applied_manual_source_path is None: 
-                            applied_manual_source_path = src_ki_in_this_tracker.norm_path 
-                        
-                        current_target_tuple = (tgt_ki_in_this_tracker.key_string, tgt_ki_in_this_tracker.norm_path)
-                        if current_target_tuple not in applied_manual_target_paths:
-                             applied_manual_target_paths.append(current_target_tuple)
-                        
+                            applied_manual_source_path = src_ki_in_this_tracker.norm_path
+                        target_display_key_for_msg = _get_display_key_for_tracker(tgt_ki_in_this_tracker, path_to_key_info, global_key_counts_for_update_tracker)
+                        current_target_tuple_for_msg = (target_display_key_for_msg, tgt_ki_in_this_tracker.norm_path)
+                        if current_target_tuple_for_msg not in applied_manual_target_paths:
+                             applied_manual_target_paths.append(current_target_tuple_for_msg)
                         if applied_manual_dep_type is None: 
-                            applied_manual_dep_type = final_char_to_apply # Use the char that was actually set
-                        elif applied_manual_dep_type != final_char_to_apply and applied_manual_dep_type != "mixed": 
+                            applied_manual_dep_type = final_char_to_set_in_grid 
+                        elif applied_manual_dep_type != final_char_to_set_in_grid and applied_manual_dep_type != "mixed": 
                             applied_manual_dep_type = "mixed"
-                            logger.debug(f"    Forced apply resulted in mixed dependency types for source {src_ki_in_this_tracker.key_string}.")
+
+                    if not is_upgraded_to_x_this_link:
+                        reciprocal_char_to_set: Optional[str] = None
+                        if final_char_to_set_in_grid == '>': reciprocal_char_to_set = '<'
+                        elif final_char_to_set_in_grid == '<': reciprocal_char_to_set = '>'
+                        
+                        if reciprocal_char_to_set:
+                            existing_char_in_reverse = temp_decomp_grid_rows[tgt_local_idx][src_local_idx]
+                            apply_reciprocal_to_cell = False
+                            if force_apply_suggestions and existing_char_in_reverse != 'x' and existing_char_in_reverse != reciprocal_char_to_set:
+                                apply_reciprocal_to_cell = True
+                            elif not force_apply_suggestions and (existing_char_in_reverse == PLACEHOLDER_CHAR or \
+                                   (existing_char_in_reverse != 'n' and get_priority(reciprocal_char_to_set) > get_priority(existing_char_in_reverse))):
+                                apply_reciprocal_to_cell = True
+                            
+                            if apply_reciprocal_to_cell:
+                                if temp_decomp_grid_rows[tgt_local_idx][src_local_idx] != reciprocal_char_to_set:
+                                    temp_decomp_grid_rows[tgt_local_idx][src_local_idx] = reciprocal_char_to_set
+                                    suggestion_applied_flag = True
+                                    logger.debug(f"    Reciprocal Applied: {tgt_ki_in_this_tracker.norm_path} -> {src_ki_in_this_tracker.norm_path} = '{reciprocal_char_to_set}'")
+                                # If forced, this reciprocal action also contributes to metadata timestamp update via any_forced_suggestion_processed_for_metadata
+                                # No need to update applied_manual_... vars again as the primary direction covers the intent.
                 
-                elif not force_apply_suggestions and existing_char not in (PLACEHOLDER_CHAR, DIAGONAL_CHAR) and existing_char != dep_char_sugg:
-                    # Log ignored suggestions only if there was a real conflict and not forced
-                    if existing_char == 'n' or get_priority(dep_char_sugg) <= get_priority(existing_char):
-                        logger.debug(f"    Suggestion Ignored: Grid '{existing_char}' (Prio: {get_priority(existing_char)}) "
-                                     f"kept over sugg '{dep_char_sugg}' (Prio: {get_priority(dep_char_sugg)}) for "
-                                     f"{src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path}.")
+                elif not force_apply_suggestions and existing_char_in_grid not in (PLACEHOLDER_CHAR, DIAGONAL_CHAR) and existing_char_in_grid != dep_char_sugg:
+                    # Log ignored suggestions
+                    if existing_char_in_grid == 'n' or get_priority(dep_char_sugg) <= get_priority(existing_char_in_grid):
+                        logger.debug(f"    Suggestion Ignored: Grid '{existing_char_in_grid}' kept over sugg '{dep_char_sugg}' for {src_ki_in_this_tracker.norm_path} -> {tgt_ki_in_this_tracker.norm_path}.")
+
+        if force_apply_suggestions and any_forced_suggestion_processed_for_metadata:
+            suggestion_applied_flag = True # Ensure timestamp update if any forced suggestion was processed, even if no grid character changed
+
 
     # --- Final Grid Consolidation ---
     consolidation_changes_ct = 0
@@ -2136,64 +2135,63 @@ def update_tracker(
         
         return overrides_applied_count
 
-    # This happens AFTER all other grid modifications but BEFORE final compression and write.
-    if final_key_info_list: # Only if there's a grid to operate on
-        loaded_ast_links = _load_ast_verified_links() # Load the AST links from file
-        if loaded_ast_links:
-            logger.info(f"Applying AST-verified overrides to grid for tracker: {os.path.basename(output_file)}")
-            # The _apply_ast_verified_overrides function is nested or defined in this file
-            ast_overrides_applied_count = _apply_ast_verified_overrides(
-                temp_decomp_grid_rows,    # Pass the current state of the decompressed grid
-                final_key_info_list,      # Pass the list defining the grid's structure
-                path_to_key_info,         # Pass the full global path_to_key_info map
-                config,                   # Pass the ConfigManager instance
-                loaded_ast_links          # Pass the loaded AST links
-            )
-            if ast_overrides_applied_count > 0:
-                # If overrides were applied, the grid content has definitely changed
-                grid_content_truly_changed_by_ops = True # Ensure this flag reflects the change
-
-                logger.info(f"AST Overrides: {ast_overrides_applied_count} overrides applied to {os.path.basename(output_file)}.")
+    # --- AST OVERRIDES BLOCK (Conditional Execution) ---
+    if apply_ast_overrides: # <<< NEW CONDITION
+        if final_key_info_list: 
+            loaded_ast_links = _load_ast_verified_links()
+            if loaded_ast_links:
+                logger.info(f"Applying AST-verified overrides to grid for tracker: {os.path.basename(output_file)}")
+                ast_overrides_applied_count = _apply_ast_verified_overrides( # This function was defined in previous step
+                    temp_decomp_grid_rows,
+                    final_key_info_list,
+                    path_to_key_info, 
+                    config,
+                    loaded_ast_links
+                )
+                # No explicit change to suggestion_applied_flag here, ast_overrides_applied_count used below
+            else:
+                logger.info(f"No AST-verified links found or loaded. Skipping AST override step for {os.path.basename(output_file)}.")
         else:
-            logger.info(f"No AST-verified links found or loaded. Skipping AST override step for {os.path.basename(output_file)}.")
-    else:
-        logger.info(f"Grid for {os.path.basename(output_file)} is empty. Skipping AST override step.")
-    # --- END OF NEW AST OVERRIDE CALL ---
+            logger.info(f"Grid for {os.path.basename(output_file)} is empty. Skipping AST override step.")
+    else: # apply_ast_overrides is False
+        logger.info(f"Skipping AST override step as per caller request for {os.path.basename(output_file)}.")
+    # --- END OF AST OVERRIDE CALL ---
 
     # --- Update Grid Edit Timestamp ---
     final_last_grid_edit = current_last_grid_edit # Start with existing or "Initial creation"
     
     # Determine if grid content truly changed (beyond just structural placeholders)
-    grid_content_truly_changed_by_ops = suggestion_applied_flag or \
+    grid_content_truly_changed_by_ops = (suggestion_applied_flag or \
                                      (consolidation_changes_ct > 0) or \
                                      grid_content_changed_by_structural or \
-                                     grid_content_changed_by_imports
+                                     grid_content_changed_by_imports or \
+                                     (ast_overrides_applied_count > 0)) # ADDED AST COUNT
 
     timestamp_now_str = datetime.datetime.now().isoformat()
-    if force_apply_suggestions and suggestion_applied_flag and applied_manual_source_path:
-        # Build detailed message for forced manual changes
+
+    # Check if the primary change was a forced manual suggestion
+    if force_apply_suggestions and any_forced_suggestion_processed_for_metadata and applied_manual_source_path: # Use any_forced_suggestion_processed_for_metadata
         src_display_label = os.path.basename(applied_manual_source_path)
-        # applied_manual_target_paths is List[Tuple[key_str, path_str]]
         unique_target_labels_for_msg = sorted(list(set(
-            f"{key_str}({os.path.basename(path_str)})" for key_str, path_str in applied_manual_target_paths
+            f"{key_str_msg}({os.path.basename(path_str_msg)})" for key_str_msg, path_str_msg in applied_manual_target_paths
         )))
         targets_display_str_msg = ", ".join(unique_target_labels_for_msg)
         final_last_grid_edit = f"Manual dep: {src_display_label} -> [{targets_display_str_msg}] ({applied_manual_dep_type or '?'}) ({timestamp_now_str})"
         logger.debug(f"Setting last_GRID_edit (manual forced): {final_last_grid_edit}")
     elif grid_content_truly_changed_by_ops: 
         if grid_structure_changed_flag and \
-           (current_last_grid_edit.startswith("Grid structure updated") or current_last_grid_edit == "Initial creation"):
+           (current_last_grid_edit.startswith("Grid structure updated") or current_last_grid_edit == "Initial creation" or "FromBackup" in current_last_grid_edit or "ErrorReading" in current_last_grid_edit):
              final_last_grid_edit = f"Grid structure and content updated ({timestamp_now_str})"
         else:
              final_last_grid_edit = f"Grid content updated ({timestamp_now_str})"
         logger.debug(f"Setting last_GRID_edit (content changed by ops): {final_last_grid_edit}")
-    elif grid_structure_changed_flag: # Only structure changed, no other significant content ops
-        if current_last_grid_edit == "Initial creation" or not current_last_grid_edit.startswith("Grid structure updated"):
+    elif grid_structure_changed_flag: 
+        if current_last_grid_edit == "Initial creation" or not current_last_grid_edit.startswith("Grid structure updated") or "FromBackup" in current_last_grid_edit or "ErrorReading" in current_last_grid_edit:
             final_last_grid_edit = f"Grid structure updated ({timestamp_now_str})"
         # If already "Grid structure updated", timestamp is implicitly updated by rewrite. No need to change msg unless content also changed.
         logger.debug(f"Setting last_GRID_edit (structure changed only): {final_last_grid_edit}")
     else:
-         logger.debug(f"Keeping existing last_GRID_edit message: '{final_last_grid_edit}' (no relevant grid changes detected to warrant message update).")
+         logger.debug(f"Keeping existing last_GRID_edit message: '{final_last_grid_edit}' (no relevant grid changes detected).")
 
     # --- Compress final grid ---
     final_grid_comp_ordered: List[str]
