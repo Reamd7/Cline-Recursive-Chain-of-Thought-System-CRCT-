@@ -139,7 +139,7 @@ This section details the procedures for the **Dispatcher** instance.
         *   **Action C (Prepare Handoff Content for Worker - for the Atomic Sub-Task)**: Gather minimal pointers and craft the handoff content. This content **MUST precisely define ONLY the single `[Atomic_Sub_Task_Description]`**.
             *   **Content to include:**
                 *   Instruction: "Assume Worker Role."
-                *   Plugin Reference: "Load `strategy_worker_plugin.md`. Execute specific action from its Section I (Worker Task Execution) as instructed."
+                *   Plugin Reference: "Read `strategy_worker_plugin.md`. Execute specific action from its Section I (Worker Task Execution) as instructed."
                 *   Overall Area Context: `[Current_Orchestration_Area_Name]`.
                 *   **Specific Sub-Task Directive**: `[Detailed instructions for the Atomic_Sub_Task_Description, referencing specific files, sections, or previous outputs if necessary]`. For example: "For Area `[Current_Orchestration_Area_Name]`, focus on file `path/to/specific_file.py`. Perform dependency analysis using `show-dependencies`. Document findings (key dependencies, implications) in `activeContext.md` under section `DepAnalysis_[specific_file_key]`." OR "Based on `implementation_plan_X.md#SectionY`, create atomic `Execution_*.md` task files. Ensure each has Objective, Min Context, Steps. Save to `tasks/exec/`. Link from Plan X."
                 *   **Strict Scope Limitation**: "DO NOT perform any other planning steps beyond this specific sub-task."
