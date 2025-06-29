@@ -31,14 +31,14 @@ If you have already read a file and have not edited it since, *DO NOT* read it a
 **Exiting Strategy Phase:** (Performed by Dispatcher)
 1.  **Completion Criteria (Mandatory Check)**: Verify ALL the following are met for the current Strategy cycle's goals:
     *   All identified areas/modules relevant to the cycle's goals have been planned (status "[x] Area Planned" in `current_cycle_checklist.md`) and their respective HDTA documents are complete.
-    *   A comprehensive implementation sequence based on dependency analysis has been defined for all planned work (documented in relevant Implementation Plans or `*_module.md` files, and its relevant sections integrated into `project_roadmap.md`).
+    *   **A comprehensive, unified, and sequenced list of all `Execution_*` tasks for the cycle has been generated and integrated into the `project_roadmap.md`**.
     *   All high-priority work planned for this strategy cycle has been decomposed into atomic Task Instructions (`*.md`), with clear phase prefixes (`Strategy_*`, `Execution_*`), and explicit minimal context links.
     *   All necessary HDTA documents (System Manifest, Domain Modules, Implementation Plans, Task Instructions) relevant to the planned work have been created or updated. No placeholders or incomplete sections relevant to the planned work remain.
-    *   `Execution_*` tasks have been sequenced and prioritized within their respective areas and reviewed for inter-area consistency during the update of `project_roadmap.md` *NOTE: Do not assign workers Execution tasks* (Step 8).
+    *   `Execution_*` tasks have been sequenced and prioritized within their respective areas and their final, unified sequence has been reviewed for inter-area consistency during the update of `project_roadmap.md`. *NOTE: Do not assign workers Execution tasks*.
     *   All HDTA documents are correctly linked (Tasks from Plans, Plans from Modules, Modules from Manifest).
     *   All `Strategy_*` tasks identified and scoped for completion *during this Strategy phase* (including those created by Workers for sub-component planning or plan refinement) have been completed.
-    *   The `project_roadmap.md` (incorporating this cycle's plan) reflects the completed planning state for all cycle goals (all relevant areas marked "[x] Area Planned", and this cycle's plan integrated into `project_roadmap.md`).
-    *   The `project_roadmap.md` has been updated with this cycle's plan, reviewed for coherence, and accurately reflects the unified roadmap for all cycle goals.
+    *   The `project_roadmap.md` (incorporating this cycle's plan) reflects the completed planning state for all cycle goals.
+    *   The `project_roadmap.md` has been updated with this cycle's plan, reviewed for coherence, and accurately reflects the unified roadmap for all cycle goals, including the explicit execution sequence for the Execution phase.
 2.  **`.clinerules` Update (Mandatory MUP Step)**: If completion criteria are met, update `.clinerules` `[LAST_ACTION_STATE]` **exactly** as follows:
     ```
     last_action: "Completed Strategy Phase: Unified Roadmap for All Cycle Goals"
@@ -51,7 +51,8 @@ If you have already read a file and have not edited it since, *DO NOT* read it a
 
 ## I. Phase Objective & Guiding Principles (Dispatcher Focus)
 
-**Objective**: The primary objective of the Strategy Phase, from the Dispatcher's perspective, is to **orchestrate the construction (if not yet existing), refinement, and maintenance of the single, comprehensive `project_roadmap.md`**. This is achieved by defining cycle goals, identifying relevant "Areas" (modules/features), and delegating the detailed planning of each Area to Worker instances. The Dispatcher reviews Worker outputs, ensures integration of planned work into `project_roadmap.md`, and confirms all `Strategy_*` planning tasks for the cycle are complete before exiting.
+**Objective**: The primary objective of the Strategy Phase, from the Dispatcher's perspective, is to **orchestrate the construction (if not yet existing), refinement, and maintenance of the single, comprehensive `project_roadmap.md`**. This is achieved by defining cycle goals, identifying relevant "Areas" (modules/features), delegating the detailed planning of each Area to Worker instances, and **finally, unifying these plans into a single, sequenced execution list within `project_roadmap.md` for the next phase.**
+The Dispatcher reviews Worker outputs, ensures integration of planned work into `project_roadmap.md`, and confirms all `Strategy_*` planning tasks for the cycle are complete before exiting.
 
 **CRITICAL CONSTRAINT: MINIMAL CONTEXT LOADING.** Proactively manage what is loaded into working context.
 
@@ -68,7 +69,7 @@ If you have already read a file and have not edited it since, *DO NOT* read it a
 1.  **Dispatcher/Worker Model**: Strategy phase orchestrated by Dispatcher delegating area planning to Workers via `<new_task>`. Workers will use `strategy_worker_plugin.md`.
 2.  **Iterative Area-Based Dispatch**: Decompose cycle goals into "areas"; iteratively dispatch planning for each.
 3.  **Review Cycle**: Review Worker output before accepting area plans or requesting revisions.
-4.  **Unification and Cohesive Roadmap**: After all areas are planned, integrate their plans into the main `project_roadmap.md`, resolving inter-area conflicts.
+4.  **Unification and Cohesive Roadmap**: After all areas are planned, integrate their plans into the main `project_roadmap.md`, resolving inter-area conflicts and **creating a single, sequenced execution list for the cycle.**
 5.  **Overall Progress Tracking**: Maintain high-level status of area planning using `current_cycle_checklist.md`.
 
 **(Overall System Principles Referenced by Dispatcher):**
@@ -151,6 +152,7 @@ This section details the procedures for the **Dispatcher** instance.
                     *   `active_context_path`: `activeContext.md` (for overall goals, and for Worker to write its output if specified)
                     *   Paths to *specific* files/diagrams directly needed for *this sub-task*.
                     *   Relevant `revision_notes` from Dispatcher if this is a re-dispatch of a failed sub-task.
+                    *   Reinforce that workers need to verify documentation against the actual code files to determine the *actual* state. 
             *   State: "Dispatcher prepared handoff content for Worker sub-task: `[Atomic_Sub_Task_Description]` for Area `[Current_Orchestration_Area_Name]`."
         *   **Action D (Use `<new_task>` Tool - Follow Interface Schema)**:
             *   **CRITICAL**: Use the `new_task` tool. Package the Handoff Content from Action C.
@@ -177,9 +179,9 @@ This section details the procedures for the **Dispatcher** instance.
             *   **Review Content**: Read the Worker Sub-Task Output file. Verify the Worker completed the *specific sub-task assigned* and documented its process and outputs accurately within that file. Check for quality and adherence to instructions. Did it overstep its scope?
                 *   **Check for Child Tasks**: Explicitly check the Worker Output File and any parent Task Instruction files created/modified by the Worker for any listed "Children" (i.e., newly created `.md` task files linked from a parent task).
                 *   If child tasks are identified:
-                    1.  Note them.
+                    1.  Note them in the Dispatcher Area Planning Log for `[Current_Orchestration_Area_Name]`.
                     2.  The Dispatcher is responsible for ensuring these child tasks are added to the `current_cycle_checklist.md` (likely nested under their parent task or the relevant Implementation Plan).
-                    3.  The Dispatcher must also ensure these child tasks are appropriately considered for subsequent planning/sequencing sub-tasks within the current Area's workflow (e.g., they will need to be assessed, have dependencies analyzed, be sequenced, etc., potentially by dispatching new sub-tasks for them if they weren't fully detailed by the initial Worker).
+                    3.  The Dispatcher must also ensure these child tasks are appropriately considered for the final cycle-wide unification and sequencing in Step 8.
             *   State: "Dispatcher review of sub-task `[Atomic_Sub_Task_Description]` output complete. Assessment: `[Brief assessment based on Worker Output file content, including note if child tasks were identified]`."
             *   **Action G (Accept or Request Revision for Sub-Task)**:
                 *   **If Acceptable**:
@@ -236,11 +238,50 @@ This section details the procedures for the **Dispatcher** instance.
     *   State: "Main `project_roadmap.md` updated with current cycle's plan. `current_cycle_checklist.md` marked accordingly. Proceeding to final phase checks."
     *   **Update `.clinerules` `[LAST_ACTION_STATE]`**: `next_action: "Final Checks and Exit Strategy Phase"`. Update `activeContext.md` to note completion of Step 8 and that `project_roadmap.md` has been updated.
 
+*   **(Dispatcher) Step 8.5: Sequencing the execution phase task list.**
+*   **Directive**: Consolidate all planned work for the cycle into a single, sequenced execution list. Integrate this unified plan into the main `project_roadmap.md`, creating an authoritative handoff for the Execution phase.
+*   **Action A (Verify All Areas Planned for Cycle)**: As a final check, read `current_cycle_checklist.md` and confirm all areas relevant to the current cycle goals have the status "[x] Area Planned". If not, return to Step 1. State: "Dispatcher confirms all required cycle Areas are marked '[x] Planned'. Proceeding with unification and `project_roadmap.md` update."
+*   **Action B (Gather All `Execution_*` Tasks for the Cycle)**:
+    *   Iterate through each planned Area in `current_cycle_checklist.md`.
+    *   For each Area, `read_file` its `implementation_plan_*.md` file(s).
+    *   Extract the list of `Execution_*.md` task files from the "Task Decomposition" section of each plan.
+    *   Compile a flat list of all `Execution_*.md` task file paths for the entire cycle.
+*   **Action C (Analyze Inter-Task Dependencies and Create Unified Sequence)**:
+    *   **Goal**: Create a single, ordered list of `Execution_*` tasks that respects all dependencies, both within and between areas.
+    *   **Process**:
+        1.  Start with an empty `final_sequence` list.
+        2.  For each task in your compiled list, use `show-dependencies --key <key_for_task_or_its_main_target>` to understand what it depends on.
+        3.  Use a topological sorting approach or a similar dependency-aware method to order the tasks. A simple iterative method:
+            *   Find all tasks with no uncompleted dependencies. Add them to the `final_sequence`.
+            *   Remove them from the "to-do" list.
+            *   Repeat until the "to-do" list is empty.
+        4.  If you encounter a circular dependency, halt, document the conflicting tasks, and plan a corrective action (e.g., dispatch a `Strategy_` task to resolve the conflict). This may require looping back to Step 1.
+    *   State: "Unified task sequence for the cycle created, respecting inter-area dependencies. Total tasks: `[N]`."
+*   **Action D (Update `project_roadmap.md` with Cycle's Plan and Unified Execution Sequence - CRITICAL)**:
+    *   **Action**: `read_file` the main `project_roadmap.md`.
+    *   **Procedure**:
+        1.  Find or create a main section for the current cycle (e.g., `## Cycle [cycle_id] Plan`).
+        2.  Under this section, add a summary of the cycle's goals and the Areas that were planned.
+        3.  **CRITICAL**: Add a new subsection titled `### Unified Execution Sequence`.
+        4.  Populate this subsection with the ordered list of `Execution_*` task files from Action C, formatted as a checklist. This is the direct handoff to the Execution phase.
+            ```markdown
+            ### Unified Execution Sequence
+
+            - [ ] `path/to/tasks/area_B/Execution_Setup_Database.md`
+            - [ ] `path/to/tasks/area_A/Execution_Implement_Core_Logic.md`
+            - [ ] `path/to/tasks/area_A/Execution_Refine_Helper_Functions.md`
+            - [ ] `path/to/tasks/area_B/Execution_Connect_API_to_DB.md`
+            - [ ] `path/to/tasks/area_C/Execution_Build_UI_Component.md`
+            ```
+        5.  **Use `apply_diff` or `write_to_file` to update `project_roadmap.md`**.
+    *   State: "Updated main `project_roadmap.md` with the cycle summary and the unified, sequenced execution task list."
+    *   **Update `.clinerules` `[LAST_ACTION_STATE]`**: `next_action: "Final Checks and Exit Strategy Phase"`. Update `activeContext.md` to note completion of Step 8.5
+
 *   **(Dispatcher) Step 9: Final Checks and Exit Strategy Phase.**
 *   **Directive**: As the Dispatcher, verify all conditions for exiting the *entire* Strategy phase are met, ensuring the roadmap for the current cycle goals is complete, consistent, and actionable.
 *   **Action A (Perform Completion Criteria Check)**: Meticulously review **ALL** points listed in the "Exiting Strategy Phase" section at the beginning of this plugin document (Section I). Verify each one against the current state of the project files, HDTA documents, checklists, and the `project_roadmap.md`. Pay special attention to:
     *   Completeness of all planned areas.
-    *   Existence and completeness of the `project_roadmap.md` content reflecting this cycle's plan.
+    *   Existence and completeness of the `project_roadmap.md` content reflecting this cycle's plan and the sequenced list for the execution phase.
     *   Absence of placeholders in relevant HDTA.
     *   Correct linking between all HDTA tiers.
     *   Completion of all `Strategy_*` tasks identified *during this entire phase* (including any created by workers and potentially missed).
@@ -284,7 +325,7 @@ This section details the procedures for the **Dispatcher** instance.
 ## VI. Quick Reference (Dispatcher Focus)
 (This is tailored from Section VI of the original plugin, lines 599-639, focusing on Dispatcher items and updated file names.)
 
-**Primary Goal**: Orchestrate construction/refinement of `project_roadmap.md` by defining cycle goals, identifying Areas, delegating Area planning to Workers, reviewing outputs, integrating plans into `project_roadmap.md`.
+**Primary Goal**: Orchestrate construction/refinement of `project_roadmap.md` by defining cycle goals, identifying Areas, delegating Area planning to Workers, reviewing outputs, and **unifying all work into a sequenced execution list within `project_roadmap.md`**.
 
 **Dispatcher Workflow Outline:**
 *   **Step 0: Initialize Strategy Cycle & Overall Goals**: Define cycle goals. ID Areas. Init `project_roadmap.md`, `current_cycle_checklist.md`. Output: Goals, Areas, trackers. Next Action: `Orchestrate Area Planning`.

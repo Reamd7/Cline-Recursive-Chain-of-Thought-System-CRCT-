@@ -8,13 +8,13 @@
 
 **Entering Execution Phase:**
 1.  **`.clinerules` Check**: Always read `.clinerules` first. If `[LAST_ACTION_STATE]` shows `current_phase: "Execution"` or `next_phase: "Execution"`, proceed with these instructions, resuming from `next_action` if specified.
-2.  **Transition from Strategy**: Typically entered after Strategy completion; `.clinerules` `next_phase` will be "Execution".
+2.  **Transition from Strategy**: The `project_roadmap.md` file, updated by the Strategy phase, now contains the definitive, sequenced list of `Execution_*` tasks for the current cycle. This list is the primary input for this phase.
 3.  **User Trigger**: Start a new session post-Strategy or to resume execution if paused.
 
 **Exiting Execution Phase:**
 1. **Completion Criteria:**
-   - All steps in the instruction file(s) for the current work cycle are executed.
-   - Expected outputs are generated.
+   - **All `Execution_*` tasks listed in the current cycle's "Unified Execution Sequence" within `project_roadmap.md` have been marked as complete (`[x]`).**
+   - Expected outputs for all tasks are generated and verified.
    - Results and observations are documented.
    - MUP is followed for all actions.
 2. **`.clinerules` Update (MUP):**
@@ -52,7 +52,16 @@
 **Action**: Load necessary context for the selected Task Instruction, respecting the planning hierarchy and dependencies.
 
 **Procedure:**
-1.  **Identify Task**: Determine the next `Execution_*.md` task to execute based on the sequence and priority documented in the parent Implementation Plan or `activeContext.md`.
+**Load the Master Plan (MANDATORY FIRST STEP)**:
+    *   `read_file` the `project_roadmap.md`.
+    *   State: "Reading `project_roadmap.md` to identify the execution sequence for the current cycle."
+
+1.  **Identify Next Task from Unified Sequence**:
+    *   Locate the "Unified Execution Sequence" checklist for the current cycle within the roadmap.
+    *   Scan the list for the **first task that is not marked as complete** (i.e., the first `[ ]`). This is the `[Current_Task_File_Path]`.
+    *   **If no incomplete tasks are found**: The execution for this cycle is complete. State: "All tasks in the project roadmap's execution sequence are complete. Proceeding to exit phase." **Go to Section I, Exiting Execution Phase.**
+    *   **If a task is found**: State: "Next task identified from roadmap: `[Current_Task_File_Path]`."
+
 2.  **Load Parent Plan (Context)**: Read the parent `implementation_plan_*.md` file (or relevant section of `*_module.md`) that contains the task. This provides higher-level objectives and context. State: "Reading parent plan `{plan_name}.md` for task context."
 3.  **Load Task Instruction**: Read the specific `Execution_{task_name}.md` file.
 4.  **Load Dependencies (MANDATORY PRE-EXECUTION STEP)**:
@@ -138,22 +147,34 @@
 
 ```mermaid
 flowchart TD
-    A[Start Step] --> B[Understand Step]
-    B --> C[Review Dependencies & Read Context Files<br>MANDATORY]
-    C --> D{File Modification Step?}
-    D -- Yes --> E[Pre-Action Verification<br> with Context]
-    D -- No --> G[Perform Action]
-    E -- Match & Valid --> G
-    E -- No Match or Invalid --> F[Re-evaluate Plan/Context]
-    F --> B
-    G --> H[Document Results]
-    H --> I{Error?}
-    I -- Yes --> J[Handle Error]
-    I -- No --> K[MUP]
-    J --> K
-    K --> L{Next Step?}
-    L -- Yes --> A
-    L -- No --> M[End Task]
+    subgraph Task Selection
+        Start_Exec[Start Execution Phase] --> Load_Roadmap[Load project_roadmap.md]
+        Load_Roadmap --> Find_Next_Task{Find Next Incomplete Task in Sequence}
+        Find_Next_Task -- Task Found --> Load_Task_File[Load Task Instruction File]
+        Find_Next_Task -- No Tasks Left --> End_Phase[Exit Execution Phase]
+    end
+
+    subgraph Task Execution
+        Load_Task_File --> Load_Context[Load Parent Plan & Dependencies]
+        Load_Context --> A[Start Step] --> B[Understand Step]
+        B --> C[Review Dependencies & Read Context Files<br>MANDATORY]
+        C --> D{File Modification?}
+        D -- Yes --> E[Pre-Action Verification<br> with Context]
+        D -- No --> G[Perform Action]
+        E -- Match & Valid --> G
+        E -- No Match or Invalid --> F[Re-evaluate Plan/Context]
+        F --> B
+        G --> H[Document Results]
+        H --> I{Error?}
+        I -- Yes --> J[Handle Error]
+        I -- No --> K[MUP]
+        J --> K
+        K --> L{Next Step in Task?}
+        L -- Yes --> A
+        L -- No --> M[End Task - Update Roadmap]
+    end
+    
+    M --> Find_Next_Task
 ```
 
 ---
