@@ -1,3 +1,5 @@
+accelerate
+transformers
 torch
 numpy
 sentence-transformers

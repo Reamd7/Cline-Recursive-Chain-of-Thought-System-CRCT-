@@ -423,9 +423,12 @@ class ConfigManager:
         from .cache_manager import cached
 
         @cached("code_roots",
-                key_func=lambda self: f"code_roots:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
+                key_func=lambda self: (lambda pr: f"code_roots:{os.path.getmtime(os.path.join(pr, '.clinerules', 'default-rules.md')) if os.path.exists(os.path.join(pr, '.clinerules', 'default-rules.md')) else (os.path.getmtime(os.path.join(pr, '.clinerules')) if os.path.exists(os.path.join(pr, '.clinerules')) else 'missing')}")(get_project_root()))
         def _get_code_root_directories(self) -> List[str]:
-            clinerules_path = os.path.join(get_project_root(), ".clinerules")
+            project_root = get_project_root()
+            new_rules_path = os.path.join(project_root, ".clinerules", "default-rules.md")
+            legacy_rules_path = os.path.join(project_root, ".clinerules")
+            clinerules_path = new_rules_path if os.path.exists(new_rules_path) else legacy_rules_path
             code_root_dirs = []
             try:
                 with open(clinerules_path, 'r', encoding='utf-8') as f:
@@ -444,7 +447,7 @@ class ConfigManager:
                                 code_root_dirs.append(normalize_path(path_part))
                         elif line.startswith("["): break # Reached next section
             except FileNotFoundError:
-                logger.warning("'.clinerules' file not found. Cannot read code root directories.")
+                logger.warning("'.clinerules/default-rules.md' not found and legacy '.clinerules' missing. Cannot read code root directories.")
             except Exception as e:
                 logger.error(f"Error reading .clinerules for code roots: {e}")
             # *** SORT the result alphabetically ***
@@ -464,9 +467,12 @@ class ConfigManager:
         from .cache_manager import cached
 
         @cached("doc_dirs",
-                key_func=lambda self: f"doc_dirs:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
+                key_func=lambda self: (lambda pr: f"doc_dirs:{os.path.getmtime(os.path.join(pr, '.clinerules', 'default-rules.md')) if os.path.exists(os.path.join(pr, '.clinerules', 'default-rules.md')) else (os.path.getmtime(os.path.join(pr, '.clinerules')) if os.path.exists(os.path.join(pr, '.clinerules')) else 'missing')}")(get_project_root()))
         def _get_doc_directories(self) -> List[str]:
-            clinerules_path = os.path.join(get_project_root(), ".clinerules")
+            project_root = get_project_root()
+            new_rules_path = os.path.join(project_root, ".clinerules", "default-rules.md")
+            legacy_rules_path = os.path.join(project_root, ".clinerules")
+            clinerules_path = new_rules_path if os.path.exists(new_rules_path) else legacy_rules_path
             doc_dirs = []
             try:
                 with open(clinerules_path, 'r', encoding='utf-8') as f:
@@ -485,7 +491,7 @@ class ConfigManager:
                                 doc_dirs.append(normalize_path(path_part))
                         elif line.startswith("["): break # Reached next section
             except FileNotFoundError:
-                 logger.warning("'.clinerules' file not found. Cannot read doc directories.")
+                 logger.warning("'.clinerules/default-rules.md' not found and legacy '.clinerules' missing. Cannot read doc directories.")
             except Exception as e:
                 logger.error(f"Error reading .clinerules for doc dirs: {e}")
             # *** SORT the result alphabetically ***

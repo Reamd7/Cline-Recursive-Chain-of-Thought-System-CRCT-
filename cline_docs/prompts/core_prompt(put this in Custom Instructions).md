@@ -15,7 +15,7 @@ The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* f
 ## Mandatory Initialization Procedure
 
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
-    1. **Read `.clinerules`**: Determine `current_phase`, `last_action`, and `next_phase`.
+    1. **Read `.clinerules/default-rules.md`**: Determine `current_phase`, `last_action`, and `next_phase`. Note: `.clinerules` is now a directory; the authoritative rules live in `.clinerules/default-rules.md`. Legacy fallbacks may exist, but all tooling should prefer `default-rules.md`.
     *Note: the `next_action` field may not be relevant if you have just been initialized, defer to `activeContext.md` to determine your next steps. If you see references to "MUP" in any context related to your next actions/steps in `.clinerules` or `activeContext.md` ignore that action/step-it is a relic left over from the last session and not your concern.*
     2. **Load Plugin**: Based on `next_phase` indicated in `.clinerules`, load the corresponding plugin from `cline_docs/prompts/`. **YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
     3. **Read Core Files**: Read the specific files listed in Section II below. Do not re-read these if already loaded in the current session.
@@ -129,12 +129,12 @@ If a required file (from the list below) is missing, handle its creation as spec
 
 *Notes*:
 - `{memory_dir}` (e.g., `cline_docs/`) is for operational memory; `{doc_dir}` (e.g., `docs/`) is for project documentation. These paths are configurable via `.clinerules.config.json` and stored in `.clinerules`. A "module" is a top-level directory within the project code root(s).
-- Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` in `.clinerules`.
+- Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` in `.clinerules/default-rules.md`.
 - **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers)**, do *not* create or modify manually. Always use the `dependency_processor.py analyze-project` command as specified in the Set-up/Maintenance phase to ensure correct format and data consistency.
 - **Note: `{module_name}_module.md` files (mini-trackers) serve a dual purpose:** they contain the HDTA Domain Module description for that specific module *and* act as mini-trackers for dependencies *within* that module. Dependencies are managed via `dependency_processor.py` commands, while the descriptive content is managed manually (typically during Strategy).
 - `progress.md` contains a high-level project checklist, this will help track the broader progress of the project.
 
-**`.clinerules` File Format (Example):**
+**`.clinerules/default-rules.md` File Format (Example):**
 
 ```
 [LAST_ACTION_STATE]
@@ -159,7 +159,7 @@ next_phase: "Set-up/Maintenance"
 
 ## III. Recursive Chain-of-Thought Loop & Plugin Workflow
 
-**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules` (in the project root) to determine `current_phase` and `last_action`. **Based on `next_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules` indicates `next_phase: Strategy`, load `strategy_plugin.md` *in conjunction with these Custom instructions*.
+**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules/default-rules.md` (in the project root under the `.clinerules` directory) to determine `current_phase` and `last_action`. **Based on `next_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules/default-rules.md` indicates `next_phase: Strategy`, load `strategy_plugin.md` *in conjunction with these Custom instructions*.
 
 **CRITICAL REMINDER**: Before any planning or action, especially in Strategy and Execution phases, you **MUST** analyze dependencies using `show-keys` and `show-dependencies` commands to understand existing relationships. **Failure to do so is a CRITICAL FAILURE**, as the CRCT system depends on this knowledge to generate accurate plans and avoid catastrophic missteps. Dependency checking is your first line of defense against project failure.
 
@@ -415,7 +415,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 ## IX. Plugin Usage Guidance
 
-**Always check `.clinerules` for `next_phase` and load the corresponding plugin.**
+**Always check `.clinerules/default-rules.md` for `next_phase` and load the corresponding plugin.**
 - **Set-up/Maintenance**: Initial setup, adding modules/docs, periodic maintenance and dependency verification (`cline_docs/prompts/setup_maintenance_plugin.md`).
 - **Strategy**: Orchestrated by a **Dispatcher** (`cline_docs/prompts/strategy_dispatcher_plugin.md`) which delegates detailed area planning to **Worker** instances (`cline_docs/prompts/strategy_worker_plugin.md`). Focuses on task decomposition, HDTA planning, and dependency-driven sequencing.
 - **Execution**: Task execution based on plans, code/file modifications (`cline_docs/prompts/execution_plugin.md`).
