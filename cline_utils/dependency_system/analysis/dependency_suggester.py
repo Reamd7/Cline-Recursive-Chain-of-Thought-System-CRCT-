@@ -38,6 +38,10 @@ from cline_utils.dependency_system.utils.cache_manager import cached, clear_all_
 import logging
 logger = logging.getLogger(__name__)
 
+# Caches for structural dependency analysis to avoid using function attributes
+_structural_import_map_cache: Dict[str, Dict[str, str]] = {}
+_structural_resolved_path_cache: Dict[Tuple[str, Optional[str]], Optional[str]] = {}
+
 # Character Definitions:
 # <: Row depends on column.
 # >: Column depends on row.
@@ -55,10 +59,8 @@ def clear_caches():
     clear_all_caches() 
     if hasattr(_find_and_parse_tsconfig, '_cache'): 
         _find_and_parse_tsconfig._cache.clear() # type: ignore 
-    if hasattr(_identify_structural_dependencies, '_import_map_cache'):
-         _identify_structural_dependencies._import_map_cache.clear() # type: ignore
-    if hasattr(_identify_structural_dependencies, '_resolved_path_cache'):
-         _identify_structural_dependencies._resolved_path_cache.clear() # type: ignore
+    _structural_import_map_cache.clear()
+    _structural_resolved_path_cache.clear()
     if hasattr(load_project_symbol_map, '_cache'):
         load_project_symbol_map._cache.clear() # type: ignore
 
@@ -109,11 +111,8 @@ def _find_and_parse_tsconfig(start_dir: str, project_root_val: str) -> Optional[
                             data = json.load(f)
                         logger.debug(f"Successfully parsed {config_path} using standard json parser.")
                         return config_path, data
-                except (FileError, ParserError, JsoncFunctionParameterError) as e_jsonc: # Catch specific jsonc-parser errors
-                    logger.warning(f"Error parsing {config_path} with jsonc-parser: {e_jsonc}. Skipping this config.")
-                    return None # Or try standard json as fallback? For now, skip on error.
-                except json.JSONDecodeError as e_json:
-                    logger.warning(f"JSONDecodeError parsing {config_path}: {e_json}. File might have comments and jsonc-parser is not available/failed.")
+                except Exception as e:
+                    logger.warning(f"Error parsing {config_path}: {e}. Skipping this config.")
                     return None
 
         if current_dir == project_root_norm or not current_dir.startswith(project_root_norm):
@@ -214,17 +213,15 @@ def suggest_dependencies(file_path: str,
         raw_ast_links_collector.extend(py_ast_links) # NEW: Collect AST links
 
     elif file_ext in ('.js', '.ts', '.tsx', '.mjs', '.cjs'):
-        # These other language suggesters (as per your provided file) expect
-        # file_analysis_results (the BIG map) and get the specific analysis internally.
-        char_suggestions = suggest_javascript_dependencies(
-            norm_path, 
-            path_to_key_info, 
-            project_root, 
-            file_analysis_results, # Pass the BIG map
-            project_symbol_map,    # It also takes project_symbol_map
+        char_suggestions, js_ast_links = suggest_javascript_dependencies(
+            norm_path,
+            path_to_key_info,
+            project_root,
+            current_file_specific_analysis,
+            project_symbol_map,
             threshold
         )
-        # No structured AST links from JS for now
+        raw_ast_links_collector.extend(js_ast_links)
 
     elif file_ext in ('.md', '.rst'):
         config = ConfigManager()
@@ -294,11 +291,6 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
     exceptions_handled = source_analysis.get("exceptions_handled", []) # NEW
     with_contexts_used = source_analysis.get("with_contexts_used", []) # NEW
 
-    # Cache for _build_import_map results per source_path
-    if not hasattr(_identify_structural_dependencies, '_import_map_cache'):
-        _identify_structural_dependencies._import_map_cache = {} # type: ignore
-    if not hasattr(_identify_structural_dependencies, '_resolved_path_cache'):
-        _identify_structural_dependencies._resolved_path_cache = {} # type: ignore
 
     def _build_import_map(current_source_path: str) -> Dict[str, str]:
         """ 
@@ -313,8 +305,8 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
         - `from my_package.another_module import specific_item as si` -> map `{"si": "/abs/path/to/my_package/another_module.py"}`
         """
         norm_source_path = normalize_path(current_source_path)
-        if norm_source_path in _identify_structural_dependencies._import_map_cache: # type: ignore
-            return _identify_structural_dependencies._import_map_cache[norm_source_path] # type: ignore
+        if norm_source_path in _structural_import_map_cache:
+            return _structural_import_map_cache[norm_source_path]
         
         local_import_map: Dict[str, str] = {} 
 
@@ -323,7 +315,7 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
         
         if not tree:
             logger.error(f"ImportMap: AST tree not found in 'ast_cache' for {norm_source_path}. Cannot build import map accurately. This may indicate a parsing failure during the analysis phase or a cache miss/eviction.")
-            _identify_structural_dependencies._import_map_cache[norm_source_path] = local_import_map 
+            _structural_import_map_cache[norm_source_path] = local_import_map
             return local_import_map # Return empty map if AST is not available
             
         try:
@@ -361,13 +353,14 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
                     base_dir_for_relative_resolve = current_source_dir
                     if level > 0: # Only adjust base_dir if it's a relative import
                         temp_base = current_source_dir
-                        for _ in range(level): 
+                        parent = None
+                        for _ in range(level):
                             parent = os.path.dirname(temp_base)
                             if not parent or parent == temp_base or not parent.startswith(normalize_path(project_root)):
                                 logger.warning(f"Relative import level {level} for '{module_name_from_ast}' in '{current_source_path}' went too high or out of project. Resolution base fallback to project root.")
-                                temp_base = normalize_path(project_root) 
-                            break
-                        temp_base = parent
+                                temp_base = normalize_path(project_root)
+                                break
+                            temp_base = parent
                         base_dir_for_relative_resolve = temp_base
                     
                     module_resolved_paths_info_list = _convert_python_import_to_paths(
@@ -419,7 +412,7 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
         except Exception as e: 
             logger.error(f"Error building import map for {norm_source_path} using AST: {e}", exc_info=False)
         
-        _identify_structural_dependencies._import_map_cache[norm_source_path] = local_import_map # type: ignore
+        _structural_import_map_cache[norm_source_path] = local_import_map
         return local_import_map
 
     current_file_import_map = _build_import_map(source_path)
@@ -431,8 +424,8 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
         # Use a cache specific to this run of _identify_structural_dependencies for this source_path
         # The cache key should remain the same as it's for the (source_path, name_to_resolve) pair.
         cache_key_res = (source_path, name_to_resolve) 
-        if cache_key_res in _identify_structural_dependencies._resolved_path_cache: # type: ignore
-            return _identify_structural_dependencies._resolved_path_cache[cache_key_res] # type: ignore
+        if cache_key_res in _structural_resolved_path_cache:
+            return _structural_resolved_path_cache[cache_key_res]
         
         parts = name_to_resolve.split('.')
         resolved_module_path_val: Optional[str] = None
@@ -461,7 +454,7 @@ def _identify_structural_dependencies(source_path: str, source_analysis: Dict[st
             # In this context, for finding *external module dependencies*, we return None.
             logger.debug(f"_resolve_name_to_path: Name '{name_to_resolve}' or its prefixes not found in import map for '{source_path}'. Assumed local or built-in.")
 
-        _identify_structural_dependencies._resolved_path_cache[cache_key_res] = resolved_module_path_val # type: ignore
+        _structural_resolved_path_cache[cache_key_res] = resolved_module_path_val
         return resolved_module_path_val
     
     # --- MODIFIED: Process Calls and Attributes with symbol verification ---
@@ -679,33 +672,213 @@ def suggest_python_dependencies(
     
     return combined_suggestions, all_raw_ast_links
 
-def suggest_javascript_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
-                                    project_root: str, file_analysis_results: Dict[str, Any],
-                                    project_symbol_map: Dict[str, Dict[str, Any]], # NEW PARAMETER
-                                    threshold: float) -> List[Tuple[str, str]]: 
+def suggest_javascript_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo],
+                                    project_root: str, source_analysis: Dict[str, Any],
+                                    project_symbol_map: Dict[str, Dict[str, Any]],
+                                    threshold: float) -> Tuple[List[Tuple[str, str]], List[Dict[str, str]]]:
+    """
+    Suggest dependencies for JS/TS/TSX by combining:
+      1) Explicit import edges from analyzer 'imports'
+      2) Structural verifications (calls, type refs, re-exports)
+      3) Semantic similarities
+    Returns combined suggestions and AST-verified links.
+    """
     norm_file_path = normalize_path(file_path)
-    analysis = file_analysis_results.get(norm_file_path)
-    if analysis is None or "error" in analysis or "skipped" in analysis: return []
+    if not source_analysis or "error" in source_analysis or "skipped" in source_analysis:
+        return [], []
 
     source_file_dir = os.path.dirname(norm_file_path)
     tsconfig_info = _find_and_parse_tsconfig(source_file_dir, project_root)
-    # tsconfig_info is Tuple[str, Dict[str, Any]] or None
-    # ---
 
-    # Pass tsconfig_info to _identify_javascript_dependencies
-    explicit_deps_paths = _identify_javascript_dependencies(
-        norm_file_path, 
-        analysis, 
-        file_analysis_results, 
-        project_root, 
-        path_to_key_info,
-        project_symbol_map, # Pass the map
-        tsconfig_info 
+    # 1) Explicit imports -> direct '<' deps + AST links
+    explicit_suggestions_paths, explicit_raw_ast_links = _identify_jsts_explicit_import_dependencies(
+        norm_file_path, source_analysis, path_to_key_info, project_root, tsconfig_info
     )
-    semantic_suggestions_paths = suggest_semantic_dependencies_path_based(norm_file_path, path_to_key_info, project_root, threshold)
-    
-    all_suggestions_paths = explicit_deps_paths + semantic_suggestions_paths
-    return _combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
+
+    # 2) Structural dependencies verified against exports/symbol map
+    structural_suggestions_paths, structural_raw_ast_links = _identify_javascript_structural_dependencies(
+        norm_file_path, source_analysis, path_to_key_info, project_root,
+        project_symbol_map, tsconfig_info
+    )
+
+    # 3) Semantic suggestions
+    semantic_suggestions_paths = suggest_semantic_dependencies_path_based(
+        norm_file_path, path_to_key_info, project_root, threshold
+    )
+
+    # Combine suggestions then return with union of AST links
+    all_suggestions_paths = explicit_suggestions_paths + structural_suggestions_paths + semantic_suggestions_paths
+    combined_suggestions = _combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
+
+    all_raw_ast_links = explicit_raw_ast_links + structural_raw_ast_links
+    return combined_suggestions, all_raw_ast_links
+
+def _identify_javascript_structural_dependencies(
+    source_path: str,
+    source_analysis: Dict[str, Any],
+    path_to_key_info: Dict[str, KeyInfo],
+    project_root: str,
+    project_symbol_map: Dict[str, Dict[str, Any]],
+    tsconfig_info: Optional[Tuple[str, Dict[str, Any]]]
+) -> Tuple[List[Tuple[str, str]], List[Dict[str, str]]]:
+    """
+    Identifies JS/TS structural dependencies by verifying that symbols used in the source file
+    are correctly imported and are present in the target module's exports.
+    """
+    suggestions_path_based: List[Tuple[str, str]] = []
+    raw_ast_verified_links: List[Dict[str, str]] = []
+    source_dir = os.path.dirname(source_path)
+
+    # --- Step 1: Handle re-exports directly ---
+    for export_item in source_analysis.get("exports", []):
+        if "from" in export_item:
+            resolved_path = _resolve_js_import_path(export_item["from"], source_dir, project_root, path_to_key_info, tsconfig_info)
+            if resolved_path and resolved_path != source_path:
+                dep_char = "<" # A re-export is a direct dependency
+                suggestions_path_based.append((resolved_path, dep_char))
+                raw_ast_verified_links.append({
+                    "source_path": source_path, "target_path": resolved_path,
+                    "char": dep_char, "reason": f"JSReExport/{export_item['name']}"
+                })
+
+    # --- Step 2: Build a reliable import map: { name_in_scope: { origin_path: "...", original_name: "..." } } ---
+    import_map: Dict[str, Dict[str, str]] = {}
+    for imp in source_analysis.get("imports", []):
+        unresolved_path = imp.get("path")
+        if not unresolved_path: continue
+        
+        resolved_path = _resolve_js_import_path(unresolved_path, source_dir, project_root, path_to_key_info, tsconfig_info)
+        if not resolved_path: continue
+
+        for symbol_info in imp.get("symbols", []):
+            symbol_type = symbol_info.get("type")
+            name_in_scope = symbol_info.get("alias") or symbol_info.get("name")
+            original_name = symbol_info.get("name")
+
+            if not name_in_scope or name_in_scope == "*": continue
+
+            if symbol_type == "namespace": original_name = "*"
+            elif symbol_type == "default": original_name = "default"
+
+            if original_name:
+                import_map[name_in_scope] = {"origin_path": resolved_path, "original_name": original_name}
+                logger.debug(f"JSImportMap: Mapped '{name_in_scope}' to {{origin:'{resolved_path}', original:'{original_name}'}}")
+
+    # --- Step 3: Helper function to resolve a symbol and verify it in the target module's exports. ---
+    def _find_and_verify_symbol_origin(symbol_name: str) -> Optional[str]:
+        if not symbol_name: return None
+        
+        parts = symbol_name.split('.')
+        base_symbol = parts[0]
+        member_access_chain = parts[1:]
+
+        import_info = import_map.get(base_symbol)
+        if not import_info: return None
+
+        resolved_path = import_info["origin_path"]
+        original_name_from_import = import_info["original_name"]
+
+        target_module_symbols = project_symbol_map.get(resolved_path)
+        if not target_module_symbols or not target_module_symbols.get("exports"):
+            logger.debug(f"JSVerify: No exports found in project_symbol_map for resolved path '{resolved_path}'.")
+            return None
+
+        # Determine what to look for in the target's exports list
+        item_to_check_in_exports = original_name_from_import
+        # If it was `import * as X from '...` and used as `X.item`
+        if original_name_from_import == "*" and member_access_chain:
+            item_to_check_in_exports = member_access_chain[0]
+        
+        for exported_item in target_module_symbols["exports"]:
+            exported_name = exported_item.get("name")
+            # `export default ...` results in name: 'default' or the actual name.
+            # `export {a}` results in name: 'a'.
+            # `export {a as b}` results in name: 'a', alias: 'b'. The exported name is 'b'.
+            public_facing_export_name = exported_item.get("alias") or exported_name
+
+            if public_facing_export_name == item_to_check_in_exports:
+                logger.debug(f"JSVerify: Verified symbol '{symbol_name}' (checking for '{item_to_check_in_exports}') is exported from '{resolved_path}'.")
+                return resolved_path
+        
+        logger.debug(f"JSVerify: Symbol '{symbol_name}' (checking for '{item_to_check_in_exports}') is NOT exported from '{resolved_path}'.")
+        return None
+
+    # --- Step 4: Iterate through calls and type references to find dependencies. ---
+    items_to_check = [
+        (source_analysis.get("calls", []), "target_name", "JSCall"),
+        (source_analysis.get("type_references", []), "type_name_str", "JSTypeRef")
+    ]
+
+    for item_list, name_key, reason_prefix in items_to_check:
+        for item in item_list:
+            item_name = item.get(name_key)
+            if not item_name: continue
+            
+            resolved_path = _find_and_verify_symbol_origin(item_name)
+            
+            if resolved_path and resolved_path != source_path:
+                dep_char = "<"
+                suggestions_path_based.append((resolved_path, dep_char))
+                raw_ast_verified_links.append({
+                    "source_path": source_path, "target_path": resolved_path,
+                    "char": dep_char, "reason": f"{reason_prefix}/{item_name}"
+                })
+                logger.debug(f"JSStructural/{reason_prefix}: Verified {source_path} < uses '{item_name}' from {resolved_path}")
+
+    return list(set(suggestions_path_based)), raw_ast_verified_links
+
+def _identify_jsts_explicit_import_dependencies(
+    source_path: str,
+    source_analysis: Dict[str, Any],
+    path_to_key_info: Dict[str, KeyInfo],
+    project_root: str,
+    tsconfig_info: Optional[Tuple[str, Dict[str, Any]]]
+) -> Tuple[List[Tuple[str, str]], List[Dict[str, str]]]:
+    """
+    Converts analyzer 'imports' entries for JS/TS/TSX into direct '<' dependencies.
+    Also emits AST-verified link entries for each resolved import.
+    Relies on _resolve_js_import_path for consistent path resolution (incl. tsconfig paths/baseUrl).
+    """
+    suggestions_path_based: List[Tuple[str, str]] = []
+    raw_ast_verified_links: List[Dict[str, str]] = []
+
+    if not source_analysis:
+        return [], []
+
+    source_dir = os.path.dirname(source_path)
+    tracked_paths_globally = set(path_to_key_info.keys())
+
+    imports_list = source_analysis.get("imports", [])
+    # imports format expected from analyzer:
+    # [
+    #   { "path": "./mod", "symbols": [ { "type": "named"/"default"/"namespace", "name": "...", "alias": "..." } ] },
+    #   { "path": "lib/core", "symbols": [...] },
+    #   ...
+    # ]
+    for imp in imports_list:
+        unresolved = imp.get("path")
+        if not unresolved:
+            continue
+
+        resolved = _resolve_js_import_path(unresolved, source_dir, project_root, path_to_key_info, tsconfig_info)
+        if not resolved:
+            continue
+
+        if resolved in tracked_paths_globally and resolved != source_path:
+            dep_char = "<"
+            suggestions_path_based.append((resolved, dep_char))
+
+            # Prefer to reference the literal import path string for reason context
+            reason_literal = unresolved
+            raw_ast_verified_links.append({
+                "source_path": source_path,
+                "target_path": resolved,
+                "char": dep_char,
+                "reason": f"ExplicitImport/{reason_literal}"
+            })
+
+    # Deduplicate suggestions
+    return list(set(suggestions_path_based)), raw_ast_verified_links
 
 def suggest_documentation_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
                                        project_root: str, file_analysis_results: Dict[str, Any],
@@ -991,138 +1164,58 @@ def _identify_python_dependencies(source_path: str, source_analysis: Dict[str, A
                  break 
     return list(set(dependencies_paths)), list(raw_ast_links)
 
-def _identify_javascript_dependencies(source_path: str, source_analysis: Dict[str, Any],
-                                    _file_analyses: Dict[str, Dict[str, Any]], 
-                                    project_root: str, 
-                                    path_to_key_info: Dict[str, KeyInfo],
-                                    project_symbol_map: Dict[str, Dict[str, Any]], 
-                                    tsconfig_info: Optional[Tuple[str, Dict[str, Any]]] = None 
-                                    ) -> List[Tuple[str, str]]:
-    logger.debug(f"JS Deps: project_symbol_map received but specific item verification from JS imports is currently limited by analyzer's output for JS.")
-    dependencies_paths: List[Tuple[str, str]] = []
-    # raw_imports_in_source is List[str] like "./utils" or "@alias/component"
-    raw_imports_in_source = source_analysis.get("imports", []) 
-    source_dir_norm = os.path.dirname(source_path)
-    tracked_paths_globally = set(path_to_key_info.keys())
-    js_extensions_check = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'] 
-
-    # Extract baseUrl and paths from tsconfig_info if available
-    base_url_from_config: Optional[str] = None
-    paths_from_config: Optional[Dict[str, List[str]]] = None
-    tsconfig_dir_path: Optional[str] = None
+def _resolve_js_import_path(
+    import_path: str,
+    source_dir: str,
+    project_root: str,
+    path_to_key_info: Dict[str, KeyInfo],
+    tsconfig_info: Optional[Tuple[str, Dict[str, Any]]]
+) -> Optional[str]:
+    """Resolves a JS/TS import path to a tracked file path."""
+    if import_path.startswith('.'):
+        base_path = normalize_path(os.path.abspath(os.path.join(source_dir, import_path)))
+        extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
+        for ext in extensions:
+            candidate = normalize_path(base_path + ext)
+            if candidate in path_to_key_info:
+                return candidate
+        return None
 
     if tsconfig_info:
-        tsconfig_dir_path = normalize_path(os.path.dirname(tsconfig_info[0]))
-        config_data = tsconfig_info[1]
-        compiler_options = config_data.get("compilerOptions", {})
-        raw_base_url = compiler_options.get("baseUrl")
-        if raw_base_url and tsconfig_dir_path: # baseUrl is relative to tsconfig_dir_path
-            base_url_from_config = normalize_path(os.path.join(tsconfig_dir_path, raw_base_url))
-            logger.debug(f"JS Resolve: Using baseUrl '{base_url_from_config}' (from {tsconfig_info[0]})")
-        raw_paths = compiler_options.get("paths")
-        if isinstance(raw_paths, dict):
-            paths_from_config = raw_paths
-            logger.debug(f"JS Resolve: Using paths configuration: {paths_from_config} (from {tsconfig_info[0]})")
-    for import_path_str_val in raw_imports_in_source:
-        if not import_path_str_val or \
-           import_path_str_val.startswith(('http:', 'https:', '//', 'data:')): 
-            continue
-        resolved_target_path_abs: Optional[str] = None
-        potential_alias_resolved_paths: List[str] = []
-        if not import_path_str_val.startswith('.') and paths_from_config and tsconfig_dir_path:
-            # Try to match import_path_str_val against keys in paths_from_config
-            for alias, target_path_patterns in paths_from_config.items():
-                # Handle wildcard matching (e.g., "@components/*": ["src/components/*"])
-                if alias.endswith('/*'):
-                    alias_prefix = alias[:-2] # e.g., "@components"
-                    if import_path_str_val.startswith(alias_prefix):
-                        wildcard_part = import_path_str_val[len(alias_prefix):] # e.g., "/Button" or "/ui/Card"
-                        for pattern in target_path_patterns:
-                            if pattern.endswith('/*'):
-                                resolved_alias_base = pattern[:-2] + wildcard_part
-                                # This resolved_alias_base is relative to tsconfig_dir_path or baseUrl
-                                resolution_base_dir = base_url_from_config if base_url_from_config else tsconfig_dir_path
-                                potential_alias_resolved_paths.append(normalize_path(os.path.join(resolution_base_dir, resolved_alias_base)))
-                        if potential_alias_resolved_paths: break # Found a matching alias pattern
-                elif import_path_str_val == alias: # Exact match
-                    for pattern in target_path_patterns:
-                        resolution_base_dir = base_url_from_config if base_url_from_config else tsconfig_dir_path
-                        potential_alias_resolved_paths.append(normalize_path(os.path.join(resolution_base_dir, pattern)))
-                    if potential_alias_resolved_paths: break # Found an exact alias match
-            
-            for alias_res_path_attempt in potential_alias_resolved_paths:
-                has_known_ext_alias = any(alias_res_path_attempt.lower().endswith(ext) for ext in js_extensions_check)
-                if has_known_ext_alias and os.path.isfile(alias_res_path_attempt):
-                    if alias_res_path_attempt.startswith(normalize_path(project_root)): 
-                        resolved_target_path_abs = alias_res_path_attempt; break
-                else:
-                    for ext_try in js_extensions_check:
-                        if os.path.isfile(f"{alias_res_path_attempt}{ext_try}") and \
-                           (f"{alias_res_path_attempt}{ext_try}").startswith(normalize_path(project_root)):
-                            resolved_target_path_abs = f"{alias_res_path_attempt}{ext_try}"; break
-                    if resolved_target_path_abs: break
-                    for ext_try in js_extensions_check: 
-                        idx_path = normalize_path(os.path.join(alias_res_path_attempt, f"index{ext_try}"))
-                        if os.path.isfile(idx_path) and idx_path.startswith(normalize_path(project_root)):
-                            resolved_target_path_abs = idx_path; break
-                    if resolved_target_path_abs: break
-            if resolved_target_path_abs:
-                 logger.debug(f"JS Resolve: Alias '{import_path_str_val}' resolved to '{resolved_target_path_abs}' via tsconfig.")
-        if not resolved_target_path_abs and import_path_str_val.startswith('.'): 
-            base_resolved_path = normalize_path(os.path.abspath(os.path.join(source_dir_norm, import_path_str_val))) 
-            if not base_resolved_path.startswith(normalize_path(project_root)):
-                logger.debug(f"JS relative import '{import_path_str_val}' in '{source_path}' resolved to '{base_resolved_path}' outside project. Skipping.")
-                continue
-            has_known_ext = any(base_resolved_path.lower().endswith(ext) for ext in js_extensions_check)
-            if has_known_ext and os.path.isfile(base_resolved_path):
-                resolved_target_path_abs = base_resolved_path
-            else: 
-                for ext_try in js_extensions_check:
-                    if os.path.isfile(f"{base_resolved_path}{ext_try}"):
-                        resolved_target_path_abs = f"{base_resolved_path}{ext_try}"; break
-                if not resolved_target_path_abs: 
-                    for ext_try in js_extensions_check:
-                        idx_path = normalize_path(os.path.join(base_resolved_path, f"index{ext_try}"))
-                        if os.path.isfile(idx_path):
-                            resolved_target_path_abs = idx_path; break
-            if resolved_target_path_abs:
-                 logger.debug(f"JS Resolve: Relative import '{import_path_str_val}' resolved to '{resolved_target_path_abs}'.")
-        if not resolved_target_path_abs and not import_path_str_val.startswith('.') and base_url_from_config:
-            # This path is not an alias, and not relative. Try resolving from baseUrl.
-            path_from_base_url = normalize_path(os.path.join(base_url_from_config, import_path_str_val))
-            # Apply extension/index checks again for this path_from_base_url
-            has_known_ext_base = any(path_from_base_url.lower().endswith(ext) for ext in js_extensions_check)
-            if has_known_ext_base and os.path.isfile(path_from_base_url):
-                if path_from_base_url.startswith(normalize_path(project_root)):
-                    resolved_target_path_abs = path_from_base_url
-            else:
-                for ext_try in js_extensions_check:
-                    if os.path.isfile(f"{path_from_base_url}{ext_try}") and \
-                       (f"{path_from_base_url}{ext_try}").startswith(normalize_path(project_root)):
-                        resolved_target_path_abs = f"{path_from_base_url}{ext_try}"; break
-                if not resolved_target_path_abs:
-                    for ext_try in js_extensions_check:
-                        idx_path = normalize_path(os.path.join(path_from_base_url, f"index{ext_try}"))
-                        if os.path.isfile(idx_path) and idx_path.startswith(normalize_path(project_root)):
-                            resolved_target_path_abs = idx_path; break
-            if resolved_target_path_abs:
-                 logger.debug(f"JS Resolve: Non-relative import '{import_path_str_val}' resolved to '{resolved_target_path_abs}' via baseUrl.")
-        if resolved_target_path_abs and resolved_target_path_abs in tracked_paths_globally and resolved_target_path_abs != source_path:
-            # At this point, resolved_target_path_abs is the path to the imported module file.
-            # We don't have the specific named imports from the simple regex in dependency_analyzer.
-            # So, we assume a dependency on the module file itself.
-            # If we had specific named imports, e.g., `imported_item_name`, we could check:
-            #   module_symbols = project_symbol_map.get(resolved_target_path_abs, {})
-            #   if any(exp['name'] == imported_item_name for exp in module_symbols.get("exports", [])):
-            #       dependencies_paths.append((resolved_target_path_abs, "<"))
-            #   else:
-            #       logger.debug(f"JS Import Check: Item '{imported_item_name}' from '{import_path_str_val}' (resolved to '{resolved_target_path_abs}') not found in its exports.")
-            # For now, a simpler approach:
-            dependencies_paths.append((resolved_target_path_abs, "<")) 
-        elif not resolved_target_path_abs and not import_path_str_val.startswith('.'):
-             logger.debug(f"JS non-relative import '{import_path_str_val}' in '{source_path}' could not be resolved within the project (checked tsconfig aliases/baseUrl). Might be an external package or unresolved.")
-    return list(set(dependencies_paths))
-
+        config_path, config = tsconfig_info
+        compiler_options = config.get("compilerOptions", {})
+        base_url_rel = compiler_options.get("baseUrl", ".")
+        base_url_abs = normalize_path(os.path.abspath(os.path.join(os.path.dirname(config_path), base_url_rel)))
+        paths = compiler_options.get("paths", {})
+        
+        for alias, mappings in paths.items():
+            alias_pattern_str = '^' + re.escape(alias).replace(r'\*', '(.*)') + '$'
+            match = re.match(alias_pattern_str, import_path)
+            if match:
+                for mapping in mappings:
+                    captured_part = match.group(1) if '*' in alias else ''
+                    expanded_path = mapping.replace('*', captured_part)
+                    candidate_base = normalize_path(os.path.join(base_url_abs, expanded_path))
+                    extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
+                    for ext in extensions:
+                        candidate = normalize_path(candidate_base + ext)
+                        if candidate in path_to_key_info:
+                            return candidate
+    
+    # Fallback for non-aliased, non-relative paths (e.g. from baseUrl)
+    if tsconfig_info:
+        config_path, config = tsconfig_info
+        compiler_options = config.get("compilerOptions", {})
+        base_url_rel = compiler_options.get("baseUrl", ".")
+        base_url_abs = normalize_path(os.path.abspath(os.path.join(os.path.dirname(config_path), base_url_rel)))
+        candidate_base = normalize_path(os.path.join(base_url_abs, import_path))
+        extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
+        for ext in extensions:
+            candidate = normalize_path(candidate_base + ext)
+            if candidate in path_to_key_info:
+                return candidate
+                
+    return None
 
 def _identify_markdown_dependencies(source_path: str, source_analysis: Dict[str, Any],
                                   _file_analyses: Dict[str, Dict[str, Any]], 

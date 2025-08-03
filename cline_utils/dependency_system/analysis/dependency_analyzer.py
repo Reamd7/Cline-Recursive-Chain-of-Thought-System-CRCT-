@@ -11,6 +11,36 @@ import re
 import logging
 from typing import Dict, List, Tuple, Set, Optional, Any
 
+# Global tree-sitter variables and their corresponding language and parser instances.
+# These are imported and initialized directly at module load time.
+import tree_sitter
+import tree_sitter_javascript as tsjavascript
+import tree_sitter_typescript as tstypescript
+import tree_sitter_css as tscss
+import tree_sitter_html as tshtml
+
+Language = tree_sitter.Language
+Parser = tree_sitter.Parser
+Query = tree_sitter.Query
+QueryCursor = tree_sitter.QueryCursor
+Node = tree_sitter.Node
+
+JS_LANGUAGE = Language(tsjavascript.language())
+CSS_LANGUAGE = Language(tscss.language())
+HTML_LANGUAGE = Language(tshtml.language())
+TS_LANGUAGE = Language(tstypescript.language_typescript())
+TSX_LANGUAGE = Language(tstypescript.language_tsx())
+
+CSS_PARSER = Parser(CSS_LANGUAGE)
+HTML_PARSER = Parser(HTML_LANGUAGE)
+JS_PARSER = Parser(JS_LANGUAGE)
+TS_PARSER = Parser(TS_LANGUAGE)
+TSX_PARSER = Parser(TSX_LANGUAGE)
+
+logger = logging.getLogger(__name__)
+# The TREE_SITTER_AVAILABLE flag is no longer needed as imports are direct.
+# If any of the above imports or initializations fail, a hard ImportError or Exception will occur.
+
 # Import only from utils, core, and io layers
 from cline_utils.dependency_system.utils.path_utils import normalize_path, is_subpath, get_file_type as util_get_file_type, get_project_root
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
@@ -29,15 +59,20 @@ HTML_LINK_HREF_PATTERN = re.compile(r'<link\s+(?:[^>]*?\s+)?href=(["\'])(?P<url>
 HTML_IMG_SRC_PATTERN = re.compile(r'<img\s+(?:[^>]*?\s+)?src=(["\'])(?P<url>[^"\']+?)\1', re.IGNORECASE)
 CSS_IMPORT_PATTERN = re.compile(r'@import\s+(?:url\s*\(\s*)?["\']?([^"\')\s]+[^"\')]*?)["\']?(?:\s*\))?;', re.IGNORECASE)
 
+def _get_ts_node_text(node: Any, content_bytes: bytes) -> str:
+    """Safely decodes the text of a tree-sitter node."""
+    return content_bytes[node.start_byte:node.end_byte].decode('utf8', errors='ignore')
+
 # --- Main Analysis Function ---
 @cached("file_analysis",
-       key_func=lambda file_path, force=False: f"analyze_file:{normalize_path(file_path)}:{(os.path.getmtime(file_path) if os.path.exists(file_path) else 0)}:{force}")
+       key_func=lambda file_path, force=False: f"analyze_file:{normalize_path(str(file_path))}:{(os.path.getmtime(str(file_path)) if os.path.exists(str(file_path)) else 0)}:{force}")
 def analyze_file(file_path: str, force: bool = False) -> Dict[str, Any]:
     """
     Analyzes a file to identify dependencies, imports, and other metadata.
     Uses caching based on file path, modification time, and force flag.
     Skips binary files before attempting text-based analysis.
     Python ASTs are stored separately in "ast_cache".
+    For JavaScript/TypeScript, 'tree-sitter' ASTs are stored in "ts_ast_cache".
 
     Args:
         file_path: Path to the file to analyze
@@ -114,15 +149,90 @@ def analyze_file(file_path: str, force: bool = False) -> Dict[str, Any]:
                 logger.warning(f"No AST object produced for {norm_file_path} (likely parsing error). 'ast_cache' will not be populated for this file or will store None.")
                 ast_cache.set(norm_file_path, None) # Store None to indicate parsing failed
             # --- END OF MODIFICATION ---
-        elif file_type == "js": _analyze_javascript_file(norm_file_path, content, analysis_result)
+        elif file_type == "js":
+            # Strict separation of concerns: use JavaScript-specific analyzer only for .js
+            _analyze_javascript_file_ts(norm_file_path, content, analysis_result)
+            ts_tree_object = analysis_result.pop("_ts_tree", None)
+            ts_ast_cache = cache_manager.get_cache("ts_ast_cache")
+            if ts_tree_object and not analysis_result.get("error"):
+                logger.debug(f"Caching tree-sitter AST for {norm_file_path} in 'ts_ast_cache'.")
+                ts_ast_cache.set(norm_file_path, ts_tree_object)
+            else:
+                ts_ast_cache.set(norm_file_path, None)
+        elif file_type == "ts":
+            # Strict separation of concerns: use TypeScript-specific analyzer only for .ts
+            _analyze_typescript_file_ts(norm_file_path, content, analysis_result)
+            ts_tree_object = analysis_result.pop("_ts_tree", None)
+            ts_ast_cache = cache_manager.get_cache("ts_ast_cache")
+            if ts_tree_object and not analysis_result.get("error"):
+                logger.debug(f"Caching tree-sitter AST for {norm_file_path} in 'ts_ast_cache'.")
+                ts_ast_cache.set(norm_file_path, ts_tree_object)
+            else:
+                ts_ast_cache.set(norm_file_path, None)
+        elif file_type == "tsx":
+            # Strict separation of concerns: use TSX-specific analyzer only for .tsx
+            _analyze_tsx_file_ts(norm_file_path, content, analysis_result)
+            ts_tree_object = analysis_result.pop("_ts_tree", None)
+            ts_ast_cache = cache_manager.get_cache("ts_ast_cache")
+            if ts_tree_object and not analysis_result.get("error"):
+                logger.debug(f"Caching tree-sitter AST for {norm_file_path} in 'ts_ast_cache'.")
+                ts_ast_cache.set(norm_file_path, ts_tree_object)
+            else:
+                ts_ast_cache.set(norm_file_path, None)
         elif file_type == "md": _analyze_markdown_file(norm_file_path, content, analysis_result)
-        elif file_type == "html": _analyze_html_file(norm_file_path, content, analysis_result)
-        elif file_type == "css": _analyze_css_file(norm_file_path, content, analysis_result)
+        elif file_type == "html": _analyze_html_file_ts(norm_file_path, content, analysis_result)
+        elif file_type == "css": _analyze_css_file_ts(norm_file_path, content, analysis_result)
         
         try: analysis_result["size"] = os.path.getsize(norm_file_path)
-        except FileNotFoundError: analysis_result["size"] = -1 
-        except OSError: analysis_result["size"] = -2 
-            
+        except FileNotFoundError: analysis_result["size"] = -1
+        except OSError: analysis_result["size"] = -2
+
+        # Emit a normalized cross-language summary used by downstream suggester/linker
+        try:
+            summary: Dict[str, Any] = {
+                "file_path": norm_file_path,
+                "file_type": file_type,
+                "imports": analysis_result.get("imports", []) or [],
+                "exports": analysis_result.get("exports", []) or [],
+                "functions": analysis_result.get("functions", []) or [],
+                "classes": analysis_result.get("classes", []) or [],
+                "calls": analysis_result.get("calls", []) or [],
+                "type_references": analysis_result.get("type_references", []) or [],
+            }
+            analysis_result["symbol_summary"] = summary
+        except Exception as e_summary:
+            logger.warning(f"Failed to build symbol_summary for {norm_file_path}: {e_summary}")
+
+        # NEW: Minimal link emission for AST-verified links pipeline
+        # We convert import paths discovered by analyzers into basic link hints
+        # Downstream resolver will resolve to absolute file keys and write to ast_verified_links.json
+        try:
+            if "ast_verified_links" not in analysis_result:
+                analysis_result["ast_verified_links"] = []
+            imports_list: List[Any] = analysis_result.get("imports", []) or []
+            for imp in imports_list:
+                if isinstance(imp, dict) and imp.get("path"):
+                    analysis_result["ast_verified_links"].append({
+                        "source_file": norm_file_path,
+                        "target_spec": imp.get("path"),
+                        "line": imp.get("line"),
+                        "via": "import",
+                        "confidence": 0.9
+                    })
+            # Also emit links from export re-exports like `export ... from 'x'`
+            exports_list: List[Any] = analysis_result.get("exports", []) or []
+            for ex in exports_list:
+                if isinstance(ex, dict) and ex.get("from"):
+                    analysis_result["ast_verified_links"].append({
+                        "source_file": norm_file_path,
+                        "target_spec": ex.get("from"),
+                        "line": ex.get("line"),
+                        "via": "export_from",
+                        "confidence": 0.9
+                    })
+        except Exception as e_links:
+            logger.warning(f"Failed to emit ast_verified_links for {norm_file_path}: {e_links}")
+
         return analysis_result # This result no longer contains _ast_tree for Python files
     except Exception as e:
         logger.exception(f"Unexpected error analyzing {norm_file_path}: {e}")
@@ -397,128 +507,566 @@ def _analyze_python_file(file_path: str, content: str, result: Dict[str, Any]) -
     
     is_tree_none_at_end = result.get("_ast_tree") is None
     logger.debug(f"DEBUG DA: End of _analyze_python_file for {file_path}. result['_ast_tree'] is None: {is_tree_none_at_end}. tree_obj_for_debug type: {type(tree_obj_for_debug)}. Keys: {list(result.keys())}")
+    
 
-def _analyze_javascript_file(file_path: str, content: str, result: Dict[str, Any]) -> None:
-    # Initialize/ensure keys exist
+
+def _analyze_javascript_file_ts(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """
+    Tree-sitter based analysis for JavaScript (.js) files using minimal, grammar-safe patterns:
+      - import paths
+      - function declarations
+      - class declarations
+      - simple identifier call expressions
+    """
     result.setdefault("imports", [])
     result.setdefault("functions", [])
     result.setdefault("classes", [])
-    result.setdefault("exports", []) 
+    result.setdefault("calls", [])
+    result.setdefault("exports", [])
+    result.setdefault("_ts_tree", None)
 
+    try:
+        content_bytes = content.encode("utf-8", errors="ignore")
+        tree = JS_PARSER.parse(content_bytes)
+        result["_ts_tree"] = tree
+
+        # Expand JS tree-sitter queries: imports (incl. require), exports, functions, classes, calls (identifier, member)
+        imports_query = """
+        [
+          (import_statement source: (string) @path)
+          (call_expression
+            function: (identifier) @req.fn
+            arguments: (arguments (string) @path)
+          ) @require
+            (#match? @req.fn "^(require|import)$")
+        ]
+        """
+        functions_query = "(function_declaration name: (identifier) @function.name)"
+        classes_query = "(class_declaration name: (identifier) @class.name)"
+        calls_query = """
+        [
+          (call_expression function: (identifier) @call.name)
+          (call_expression function: (member_expression property: (property_identifier) @call.name))
+        ]
+        """
+        exports_query = """
+        [
+        (export_statement
+            (export_clause (export_specifier name: (identifier) @export.name))
+        )
+        (export_statement
+            (export_clause (export_specifier name: (identifier) @export.orig alias: (identifier) @export.alias))
+        )
+        (export_statement
+            declaration: (variable_declaration
+            (variable_declarator
+                name: (identifier) @export.default))
+        ) @default.export
+        (export_statement
+            declaration: (function_declaration name: (identifier) @export.func.name)
+        )
+        (export_statement
+            declaration: (class_declaration name: (identifier) @export.class.name)
+        )
+        ]
+        """
+
+        def run_query_js(query_str: str) -> List[Tuple[Any, str]]:
+            # Use QueryCursor.matches API per tree_sitter/__init__.pyi
+            q = Query(JS_LANGUAGE, query_str)
+            captures: List[Tuple[Any, str]] = []
+            cursor = QueryCursor(q)
+            matches = cursor.matches(tree.root_node)
+            for _pattern_index, captures_dict in matches:
+                for cap_name, nodes in captures_dict.items():
+                    for node in nodes:
+                        captures.append((node, cap_name))
+            return captures
+
+        # Imports (ESM and require/import() calls)
+        for node, cap in run_query_js(imports_query):
+            if cap == "path":
+                path_text = _get_ts_node_text(node, content_bytes)
+                if len(path_text) >= 2 and path_text[0] in ('"', "'") and path_text[-1] == path_text[0]:
+                    path_text = path_text[1:-1]
+                result["imports"].append({"path": path_text, "line": node.start_point[0] + 1, "symbols": []})
+
+        # Functions
+        for node, cap in run_query_js(functions_query):
+            if cap == "function.name":
+                result["functions"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Classes
+        for node, cap in run_query_js(classes_query):
+            if cap == "class.name":
+                result["classes"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Calls (identifier and member-expression calls)
+        for node, cap in run_query_js(calls_query):
+            if cap == "call.name":
+                result["calls"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Exports (collect names and re-exports)
+        result.setdefault("exports", [])
+        for node, cap in run_query_js(exports_query):
+            if cap == "export.name":
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.orig":
+                # will be paired with alias cap in same match; capture as name, alias separately if present
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.alias":
+                # attach alias to last export if appropriate
+                if result["exports"]:
+                    result["exports"][-1]["alias"] = _get_ts_node_text(node, content_bytes)
+            elif cap == "export.from":
+                from_text = _get_ts_node_text(node, content_bytes)
+                if len(from_text) >= 2 and from_text[0] in ('"', "'") and from_text[-1] == from_text[0]:
+                    from_text = from_text[1:-1]
+                result["exports"].append({"from": from_text, "line": node.start_point[0] + 1})
+            elif cap == "export.default":
+                result["exports"].append({"name": "default", "alias": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+    except Exception as e:
+        logger.exception(f"JS analysis error for {file_path}: {e}")
+        result["error"] = f"JS analysis error: {e}"
+    finally:
+        # Normalization to ensure downstream suggestion pipeline has consistent shapes
+        result.setdefault("imports", [])
+        result.setdefault("functions", [])
+        result.setdefault("classes", [])
+        result.setdefault("calls", [])
+        result.setdefault("exports", [])
+        # ensure import dicts have "path" key
+        norm_imports: List[Dict[str, Any]] = []
+        for imp in result["imports"]:
+            if isinstance(imp, dict):
+                if "path" in imp:
+                    norm_imports.append(imp)
+                elif "source" in imp:
+                    norm_imports.append({"path": imp["source"], **{k: v for k, v in imp.items() if k != "source"}})
+            elif isinstance(imp, str):
+                norm_imports.append({"path": imp})
+        result["imports"] = norm_imports
+        # Tag analysis kind for consumers
+        result["analysis_kind"] = "js"
+        # Build exports (JS minimal): handle `export ... from "path"` re-exports if present
+        try:
+            if "exports" not in result:
+                result["exports"] = []
+            # A very light pattern using tree-sitter captures already built elsewhere can be added later.
+            # Keep placeholder structure consistent.
+        except Exception:
+            pass
+
+def _analyze_typescript_file_ts(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """
+    Tree-sitter based analysis for TypeScript (.ts) files using minimal, grammar-safe patterns:
+      - import paths
+      - function declarations
+      - class declarations
+      - simple identifier call expressions
+      - type references (type_identifier in type_annotation/generic_type)
+    """
+    result.setdefault("imports", [])
+    result.setdefault("functions", [])
+    result.setdefault("classes", [])
+    result.setdefault("calls", [])
+    result.setdefault("type_references", [])
+    result.setdefault("_ts_tree", None)
+
+    try:
+        content_bytes = content.encode("utf-8", errors="ignore")
+        tree = TS_PARSER.parse(content_bytes)
+        result["_ts_tree"] = tree
+
+        # Expand TS queries: imports (incl. require), exports, richer calls, plus types
+        imports_query = """
+        [
+          (import_statement source: (string) @path)
+          (call_expression
+            function: (identifier) @req.fn
+            arguments: (arguments (string) @path))
+            (#match? @req.fn "^(require|import)$")
+        ]
+        """
+        functions_query = "(function_declaration name: (identifier) @function.name)"
+        classes_query = "(class_declaration name: (identifier) @class.name)"
+        calls_query = """
+        [
+          (call_expression function: (identifier) @call.name)
+          (call_expression function: (member_expression property: (property_identifier) @call.name))
+        ]
+        """
+        type_ann_query = "(type_annotation (type_identifier) @type.name)"
+        generic_type_query = "(generic_type (type_identifier) @type.name)"
+        exports_query = """
+        [
+          (export_statement
+            (export_clause (export_specifier name: (identifier) @export.name))
+          )
+          (export_statement
+            (export_clause (export_specifier name: (identifier) @export.orig alias: (identifier) @export.alias))
+          )
+          (export_statement
+            (export_clause (export_from_clause source: (string) @export.from))
+          )
+          (export_statement
+            (export_default_declaration (identifier) @export.default)
+          )
+        ]
+        """
+
+        def run_query_ts(query_str: str) -> List[Tuple[Any, str]]:
+            q = Query(TS_LANGUAGE, query_str)
+            captures: List[Tuple[Any, str]] = []
+            cursor = QueryCursor(q)
+            matches = cursor.matches(tree.root_node)
+            for _pattern_index, captures_dict in matches:
+                for cap_name, nodes in captures_dict.items():
+                    for node in nodes:
+                        captures.append((node, cap_name))
+            return captures
+
+        # Imports
+        for node, cap in run_query_ts(imports_query):
+            if cap == "path":
+                path_text = _get_ts_node_text(node, content_bytes)
+                if len(path_text) >= 2 and path_text[0] in ('"', "'") and path_text[-1] == path_text[0]:
+                    path_text = path_text[1:-1]
+                result["imports"].append({"path": path_text, "line": node.start_point[0] + 1, "symbols": []})
+
+        # Functions
+        for node, cap in run_query_ts(functions_query):
+            if cap == "function.name":
+                result["functions"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Classes
+        for node, cap in run_query_ts(classes_query):
+            if cap == "class.name":
+                result["classes"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Calls
+        for node, cap in run_query_ts(calls_query):
+            if cap == "call.name":
+                result["calls"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Type references
+        for node, cap in run_query_ts(type_ann_query):
+            if cap == "type.name":
+                result["type_references"].append({"type_name_str": _get_ts_node_text(node, content_bytes), "context": "type_annotation", "line": node.start_point[0] + 1})
+        for node, cap in run_query_ts(generic_type_query):
+            if cap == "type.name":
+                result["type_references"].append({"type_name_str": _get_ts_node_text(node, content_bytes), "context": "generic_type", "line": node.start_point[0] + 1})
+
+        # Exports
+        result.setdefault("exports", [])
+        for node, cap in run_query_ts(exports_query):
+            if cap == "export.name":
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.orig":
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.alias":
+                if result["exports"]:
+                    result["exports"][-1]["alias"] = _get_ts_node_text(node, content_bytes)
+            elif cap == "export.from":
+                from_text = _get_ts_node_text(node, content_bytes)
+                if len(from_text) >= 2 and from_text[0] in ('"', "'") and from_text[-1] == from_text[0]:
+                    from_text = from_text[1:-1]
+                result["exports"].append({"from": from_text, "line": node.start_point[0] + 1})
+            elif cap == "export.default":
+                result["exports"].append({"name": "default", "alias": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+    except Exception as e:
+        logger.exception(f"TS analysis error for {file_path}: {e}")
+        result["error"] = f"TS analysis error: {e}"
+    finally:
+        # Normalization for suggestion pipeline
+        result.setdefault("imports", [])
+        result.setdefault("functions", [])
+        result.setdefault("classes", [])
+        result.setdefault("calls", [])
+        result.setdefault("type_references", [])
+        result.setdefault("exports", [])
+        norm_imports: List[Dict[str, Any]] = []
+        for imp in result["imports"]:
+            if isinstance(imp, dict):
+                if "path" in imp:
+                    norm_imports.append(imp)
+                elif "source" in imp:
+                    norm_imports.append({"path": imp["source"], **{k: v for k, v in imp.items() if k != "source"}})
+            elif isinstance(imp, str):
+                norm_imports.append({"path": imp})
+        result["imports"] = norm_imports
+        result["analysis_kind"] = "ts"
+        # Ensure exports list exists for re-export links
+        try:
+            result.setdefault("exports", [])
+        except Exception:
+            pass
+
+def _analyze_tsx_file_ts(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """
+    Tree-sitter based analysis for TSX (.tsx) files using minimal, grammar-safe patterns:
+      - import paths
+      - function declarations
+      - class declarations
+      - simple identifier call expressions
+      - type references (type_identifier in type_annotation/generic_type)
+    """
+    result.setdefault("imports", [])
+    result.setdefault("functions", [])
+    result.setdefault("classes", [])
+    result.setdefault("calls", [])
+    result.setdefault("type_references", [])
+    result.setdefault("_ts_tree", None)
+
+    try:
+        content_bytes = content.encode("utf-8", errors="ignore")
+        tree = TSX_PARSER.parse(content_bytes)
+        result["_ts_tree"] = tree
+
+        # Expand TSX queries similar to TS
+        imports_query = """
+        [
+          (import_statement source: (string) @path)
+          (call_expression
+            function: (identifier) @req.fn
+            arguments: (arguments (string) @path))
+            (#match? @req.fn "^(require|import)$")
+        ]
+        """
+        functions_query = "(function_declaration name: (identifier) @function.name)"
+        classes_query = "(class_declaration name: (identifier) @class.name)"
+        calls_query = """
+        [
+          (call_expression function: (identifier) @call.name)
+          (call_expression function: (member_expression property: (property_identifier) @call.name))
+        ]
+        """
+        type_ann_query = "(type_annotation (type_identifier) @type.name)"
+        generic_type_query = "(generic_type (type_identifier) @type.name)"
+        exports_query = """
+        [
+          (export_statement
+            (export_clause (export_specifier name: (identifier) @export.name))
+          )
+          (export_statement
+            (export_clause (export_specifier name: (identifier) @export.orig alias: (identifier) @export.alias))
+          )
+          (export_statement
+            (export_clause (export_from_clause source: (string) @export.from))
+          )
+          (export_statement
+            (export_default_declaration (identifier) @export.default)
+          )
+        ]
+        """
+
+        def run_query_tsx(query_str: str) -> List[Tuple[Any, str]]:
+            q = Query(TSX_LANGUAGE, query_str)
+            captures: List[Tuple[Any, str]] = []
+            cursor = QueryCursor(q)
+            matches = cursor.matches(tree.root_node)
+            for _pattern_index, captures_dict in matches:
+                for cap_name, nodes in captures_dict.items():
+                    for node in nodes:
+                        captures.append((node, cap_name))
+            return captures
+
+        # Imports
+        for node, cap in run_query_tsx(imports_query):
+            if cap == "path":
+                path_text = _get_ts_node_text(node, content_bytes)
+                if len(path_text) >= 2 and path_text[0] in ('"', "'") and path_text[-1] == path_text[0]:
+                    path_text = path_text[1:-1]
+                result["imports"].append({"path": path_text, "line": node.start_point[0] + 1, "symbols": []})
+
+        # Functions
+        for node, cap in run_query_tsx(functions_query):
+            if cap == "function.name":
+                result["functions"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Classes
+        for node, cap in run_query_tsx(classes_query):
+            if cap == "class.name":
+                result["classes"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Calls
+        for node, cap in run_query_tsx(calls_query):
+            if cap == "call.name":
+                result["calls"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+        # Type references
+        for node, cap in run_query_tsx(type_ann_query):
+            if cap == "type.name":
+                result["type_references"].append({"type_name_str": _get_ts_node_text(node, content_bytes), "context": "type_annotation", "line": node.start_point[0] + 1})
+        for node, cap in run_query_tsx(generic_type_query):
+            if cap == "type.name":
+                result["type_references"].append({"type_name_str": _get_ts_node_text(node, content_bytes), "context": "generic_type", "line": node.start_point[0] + 1})
+
+        # Exports
+        result.setdefault("exports", [])
+        for node, cap in run_query_tsx(exports_query):
+            if cap == "export.name":
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.orig":
+                result["exports"].append({"name": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+            elif cap == "export.alias":
+                if result["exports"]:
+                    result["exports"][-1]["alias"] = _get_ts_node_text(node, content_bytes)
+            elif cap == "export.from":
+                from_text = _get_ts_node_text(node, content_bytes)
+                if len(from_text) >= 2 and from_text[0] in ('"', "'") and from_text[-1] == from_text[0]:
+                    from_text = from_text[1:-1]
+                result["exports"].append({"from": from_text, "line": node.start_point[0] + 1})
+            elif cap == "export.default":
+                result["exports"].append({"name": "default", "alias": _get_ts_node_text(node, content_bytes), "line": node.start_point[0] + 1})
+
+    except Exception as e:
+        logger.exception(f"TSX analysis error for {file_path}: {e}")
+        result["error"] = f"TSX analysis error: {e}"
+    finally:
+        # Normalization for suggestion pipeline
+        result.setdefault("imports", [])
+        result.setdefault("functions", [])
+        result.setdefault("classes", [])
+        result.setdefault("calls", [])
+        result.setdefault("type_references", [])
+        result.setdefault("exports", [])
+        norm_imports: List[Dict[str, Any]] = []
+        for imp in result["imports"]:
+            if isinstance(imp, dict):
+                if "path" in imp:
+                    norm_imports.append(imp)
+                elif "source" in imp:
+                    norm_imports.append({"path": imp["source"], **{k: v for k, v in imp.items() if k != "source"}})
+            elif isinstance(imp, str):
+                norm_imports.append({"path": imp})
+        result["imports"] = norm_imports
+        result["analysis_kind"] = "tsx"
+        # Ensure exports list exists for re-export links
+        try:
+            result.setdefault("exports", [])
+        except Exception:
+            pass
+
+def _analyze_javascript_file_regex_fallback(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """
+    Fallback analysis for JS files using regex (when tree-sitter unavailable or errors occur).
+    """
     import_matches = JAVASCRIPT_IMPORT_PATTERN.finditer(content)
-    result["imports"] = [m.group(1) or m.group(2) or m.group(3) for m in import_matches if m and (m.group(1) or m.group(2) or m.group(3))]
-    
-    try: 
-        # Basic function and class detection (already present)
-        func_pattern = re.compile(r'(?:async\s+)?function\s*\*?\s*([a-zA-Z_$][\w$]*)\s*\([^)]*\)')
-        arrow_pattern = re.compile(r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>')
-        class_pattern = re.compile(r'class\s+([a-zA-Z_$][\w$]*)')
-        for match in func_pattern.finditer(content): 
-            result["functions"].append({"name": match.group(1), "line": content[:match.start()].count('\n') + 1})
-        for match in arrow_pattern.finditer(content): 
-            result["functions"].append({"name": match.group(1), "line": content[:match.start()].count('\n') + 1, "type": "arrow"})
-        for match in class_pattern.finditer(content): 
-            result["classes"].append({"name": match.group(1), "line": content[:match.start()].count('\n') + 1})
-
-        # NEW: Basic regex for exports (can be improved with more specific patterns)
-        # export function foo() {}  OR export async function foo() {}
-        export_func_pattern = re.compile(r'export\s+(?:async\s+)?function\s*\*?\s*([a-zA-Z_$][\w$]*)')
-        # export class Foo {}
-        export_class_pattern = re.compile(r'export\s+class\s+([a-zA-Z_$][\w$]*)')
-        # export const foo = ..., export let foo = ..., export var foo = ...
-        export_var_pattern = re.compile(r'export\s+(?:const|let|var)\s+([a-zA-Z_$][\w$]*)')
-        # export default function foo() {} OR export default function() {}
-        export_default_func_pattern = re.compile(r'export\s+default\s+(?:async\s+)?function\s*\*?\s*([a-zA-Z_$][\w$]*)?')
-        # export default class Foo {} OR export default class {}
-        export_default_class_pattern = re.compile(r'export\s+default\s+class\s+([a-zA-Z_$][\w$]*)?')
-        # export default foo; (where foo is already defined)
-        export_default_identifier_pattern = re.compile(r'export\s+default\s+([a-zA-Z_$][\w$]*);')
-        # --- ADDED: Regex for export { name1, name2 as alias } ---
-        export_named_block_pattern = re.compile(r'export\s*{\s*([^}]+)\s*}')
-        # ---
-
-        for match in export_func_pattern.finditer(content):
-            result["exports"].append({"name": match.group(1), "type": "function", "line": content[:match.start()].count('\n') + 1})
-        for match in export_class_pattern.finditer(content):
-            result["exports"].append({"name": match.group(1), "type": "class", "line": content[:match.start()].count('\n') + 1})
-        for match in export_var_pattern.finditer(content):
-            result["exports"].append({"name": match.group(1), "type": "variable", "line": content[:match.start()].count('\n') + 1})
-        for match in export_default_func_pattern.finditer(content):
-            name = match.group(1) or "_default_function" # Handle anonymous default function
-            result["exports"].append({"name": name, "type": "function", "is_default": True, "line": content[:match.start()].count('\n') + 1})
-        for match in export_default_class_pattern.finditer(content):
-            name = match.group(1) or "_default_class" # Handle anonymous default class
-            result["exports"].append({"name": name, "type": "class", "is_default": True, "line": content[:match.start()].count('\n') + 1})
-        for match in export_default_identifier_pattern.finditer(content):
-            result["exports"].append({"name": match.group(1), "type": "identifier", "is_default": True, "line": content[:match.start()].count('\n') + 1})
-        
-        # --- ADDED: Processing for export_named_block_pattern ---
-        for match in export_named_block_pattern.finditer(content):
-            items_str = match.group(1) # Content inside {}
-            line_num = content[:match.start()].count('\n') + 1
-            # Split by comma, then process each item for potential "as" alias
-            individual_exports = [item.strip() for item in items_str.split(',')]
-            for export_item_str in individual_exports:
-                if not export_item_str: continue
-                name_parts = [p.strip() for p in export_item_str.split(' as ')]
-                original_name = name_parts[0]
-                exported_name = name_parts[-1] # If "as" is used, this is the alias; otherwise, same as original_name
-                result["exports"].append({
-                    "name": exported_name, 
-                    "original_name": original_name if len(name_parts) > 1 else None,
-                    "type": "named_block_item", 
-                    "line": line_num
-                })
-        # ---
-    except Exception as e: logger.warning(f"Regex error during JS analysis in {file_path}: {e}")
+    # Ensure imports are not duplicated if fallback is called after partial AST analysis
+    existing_imports = set(d['path'] for d in result.get("imports", []))
+    new_imports = [m.group(1) or m.group(2) or m.group(3) for m in import_matches if m and (m.group(1) or m.group(2) or m.group(3))]
+    for imp in new_imports:
+        if imp not in existing_imports:
+            result["imports"].append({"path": imp, "line": -1, "symbols": []}) # Added symbols for consistency
 
 def _analyze_markdown_file(file_path: str, content: str, result: Dict[str, Any]) -> None:
     """Analyzes Markdown file content using regex."""
     result["links"] = []; result["code_blocks"] = []
-    try: 
+    try:
         for match in MARKDOWN_LINK_PATTERN.finditer(content):
             url = match.group(1);
             if url and not url.startswith(('#', 'http:', 'https:', 'mailto:', 'tel:')): result["links"].append({"url": url, "line": content[:match.start()].count('\n') + 1})
     except Exception as e: logger.warning(f"Regex error during MD link analysis in {file_path}: {e}")
-    try: 
+    try:
         code_block_pattern = re.compile(r'```(\w+)?\n(.*?)```', re.DOTALL)
         for match in code_block_pattern.finditer(content):
-             lang = match.group(1) or "text"; 
+             lang = match.group(1) or "text";
              result["code_blocks"].append({"language": lang.lower(), "line": content[:match.start()].count('\n') + 1})
     except Exception as e: logger.warning(f"Regex error during MD code block analysis in {file_path}: {e}")
 
-def _analyze_html_file(file_path: str, content: str, result: Dict[str, Any]) -> None:
-    """Analyzes HTML file content using regex."""
-    result["links"] = [] # For <a> tags
-    result["scripts"] = [] # For <script src="...">
-    result["stylesheets"] = [] # For <link rel="stylesheet" href="...">
-    result["images"] = [] # For <img src="...">
+def _analyze_html_file_ts(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """Analyzes HTML file content using tree-sitter."""
+    for key in ["links", "scripts", "stylesheets", "images", "_ts_tree"]:
+        result.setdefault(key, [] if key != "_ts_tree" else None)
 
-    def find_resources(pattern, type_list_name): # Pass name of list in result
-        type_list = result[type_list_name]
-        try:
-            for match in pattern.finditer(content):
-                url = match.group("url")
-                if url and not url.startswith(('#', 'http:', 'https:', 'mailto:', 'tel:', 'data:')): type_list.append({"url": url, "line": content[:match.start()].count('\n') + 1})
-        except Exception as e: logger.warning(f"Regex error during HTML {type_list_name} analysis in {file_path}: {e}")
-    find_resources(HTML_A_HREF_PATTERN, "links"); find_resources(HTML_SCRIPT_SRC_PATTERN, "scripts"); find_resources(HTML_IMG_SRC_PATTERN, "images")
-    try: 
-        link_tag_pattern = re.compile(r'<link([^>]+)>', re.IGNORECASE); href_pattern = re.compile(r'href=(["\'])(?P<url>[^"\']+?)\1', re.IGNORECASE); rel_pattern = re.compile(r'rel=(["\'])stylesheet\1', re.IGNORECASE)
-        for link_match in link_tag_pattern.finditer(content):
-            tag_content = link_match.group(1); href_match = href_pattern.search(tag_content); rel_match = rel_pattern.search(tag_content)
-            if href_match and rel_match:
-                url = href_match.group("url")
-                if url and not url.startswith(('#', 'http:', 'https:', 'mailto:', 'tel:', 'data:')): result["stylesheets"].append({"url": url, "line": content[:link_match.start()].count('\n') + 1})
-    except Exception as e: logger.warning(f"Regex error during HTML stylesheet analysis in {file_path}: {e}")
+    # HTML_PARSER, HTML_LANGUAGE, Query, QueryCursor are directly imported and initialized at module load.
+    # If they are None, a hard import error would have occurred.
+    # No explicit check for TREE_SITTER_AVAILABLE as imports are now direct.
 
-def _analyze_css_file(file_path: str, content: str, result: Dict[str, Any]) -> None:
-    """Analyzes CSS file content using regex."""
-    result["imports"] = [] # For @import rules
+    queries = {
+        "scripts": '(script_element (start_tag (attribute (attribute_name) @name (#eq? @name "src") (quoted_attribute_value (attribute_value) @path))))',
+        "stylesheets": '(element (start_tag (tag_name) @tag (#eq? @tag "link") (attribute (attribute_name) @name (#eq? @name "href") (quoted_attribute_value (attribute_value) @path))))',
+        "images": '(element (start_tag (tag_name) @tag (#eq? @tag "img") (attribute (attribute_name) @name (#eq? @name "src") (quoted_attribute_value (attribute_value) @path))))',
+        "links": '(element (start_tag (tag_name) @tag (#eq? @tag "a") (attribute (attribute_name) @name (#eq? @name "href") (quoted_attribute_value (attribute_value) @path))))'
+    }
+    
+    lang_queries = {name: Query(HTML_LANGUAGE, q_str) for name, q_str in queries.items()}
 
     try:
-        for match in CSS_IMPORT_PATTERN.finditer(content):
-             url = match.group(1)
-             if url and not url.startswith(('#', 'http:', 'https:', 'data:')): result["imports"].append({"url": url.strip(), "line": content[:match.start()].count('\n') + 1})
-    except Exception as e: logger.warning(f"Regex error during CSS import analysis in {file_path}: {e}")
+        content_bytes = content.encode('utf8')
+        tree = HTML_PARSER.parse(content_bytes)
+        result["_ts_tree"] = tree
+        root_node = tree.root_node
+
+        for query_name, query in lang_queries.items():
+            cursor = QueryCursor(query) 
+            for _pattern_index, captures_dict in cursor.matches(root_node):
+                path_nodes = captures_dict.get("path")
+                if not path_nodes: continue
+                
+                for node in path_nodes:
+                    line = node.start_point[0] + 1
+                    url = _get_ts_node_text(node, content_bytes)
+                    if url and not url.startswith(('#', 'http:', 'https:', 'mailto:', 'tel:', 'data:')):
+                        if query_name == "scripts":
+                            result["scripts"].append({"url": url, "line": line})
+                        elif query_name == "stylesheets":
+                            result["stylesheets"].append({"url": url, "line": line})
+                        elif query_name == "images":
+                            result["images"].append({"url": url, "line": line})
+                        elif query_name == "links":
+                            result["links"].append({"url": url, "line": line})
+        
+        for key in ["links", "scripts", "stylesheets", "images"]:
+            if result.get(key):
+                unique_items = {frozenset(d.items()) for d in result[key]}
+                result[key] = [dict(fs) for fs in unique_items]
+
+    except Exception as e:
+        logger.error(f"Error parsing HTML {file_path} with tree-sitter: {e}", exc_info=True)
+        result["error"] = f"Tree-sitter HTML parsing error: {e}"
+
+
+def _analyze_css_file_ts(file_path: str, content: str, result: Dict[str, Any]) -> None:
+    """Analyzes CSS file content using tree-sitter."""
+    result.setdefault("imports", [])
+    result.setdefault("_ts_tree", None)
+
+    # CSS_PARSER, CSS_LANGUAGE, Query, QueryCursor are directly imported and initialized at module load.
+    # If they are None, a hard import error would have occurred.
+    # No explicit check for TREE_SITTER_AVAILABLE as imports are now direct.
+        
+    query_str = """
+    (import_statement (string_value) @path)
+    """
+    
+    query = Query(CSS_LANGUAGE, query_str)
+    
+    try:
+        content_bytes = content.encode('utf8')
+        tree = CSS_PARSER.parse(content_bytes)
+        result["_ts_tree"] = tree
+        root_node = tree.root_node
+
+        cursor = QueryCursor(query) 
+        for _pattern_index, captures_dict in cursor.matches(root_node):
+            path_nodes = captures_dict.get("path")
+            if not path_nodes: continue
+            for node in path_nodes:
+                line = node.start_point[0] + 1
+                url = _get_ts_node_text(node, content_bytes).strip("'\"")
+                if url and not url.startswith(('#', 'http:', 'https:', 'data:')):
+                    result["imports"].append({"url": url, "line": line})
+
+        if result.get("imports"):
+            unique_items = {frozenset(d.items()) for d in result["imports"]}
+            result["imports"] = [dict(fs) for fs in unique_items]
+
+    except Exception as e:
+        logger.error(f"Error parsing CSS {file_path} with tree-sitter: {e}", exc_info=True)
+        result["error"] = f"Tree-sitter CSS parsing error: {e}"
 
 # --- End of dependency_analyzer.py ---

@@ -1,5 +1,12 @@
+tree-sitter
+tree-sitter-css
+tree-sitter-html
+tree-sitter-javascript
+tree-sitter-python
+tree-sitter-typescript
 accelerate
 transformers
 torch
 numpy
 sentence-transformers
+jsonc-parser

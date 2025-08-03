@@ -672,13 +672,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- MODIFICATION: Clear the dedicated AST cache at the end of the project analysis ---
     try:
         ast_cache_instance = cache_manager.get_cache("ast_cache")
-        # More robustly clear the cache data if Cache class has such a method or clear dicts directly
-        if hasattr(ast_cache_instance, 'data') and isinstance(ast_cache_instance.data, dict):
-            ast_cache_instance.data.clear()
-        if hasattr(ast_cache_instance, 'dependencies') and isinstance(ast_cache_instance.dependencies, dict):
-            ast_cache_instance.dependencies.clear()
-        if hasattr(ast_cache_instance, 'reverse_deps') and isinstance(ast_cache_instance.reverse_deps, dict):
-            ast_cache_instance.reverse_deps.clear()
+
         # Reset hits/misses if desired, or let them accumulate if CacheManager instance is long-lived
         ast_cache_instance.hits = 0
         ast_cache_instance.misses = 0

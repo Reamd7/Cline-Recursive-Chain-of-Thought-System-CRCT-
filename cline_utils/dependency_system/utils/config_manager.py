@@ -38,12 +38,14 @@ DEFAULT_CONFIG = {
         "tmp",
         "temp",
         "tests",
+        "__tests__",
         "examples",
         "embeddings",
-        # Explicitly exclude the default embeddings directory path relative to project root
-        # to prevent processing its own contents (metadata.json, .npy files)
         "cline_utils/dependency_system/analysis/embeddings",
-        "cline_docs/dependency_diagrams", 
+        "cline_docs/dependency_diagrams",
+        "cline_utils",
+        "cline_docs",
+        ".roo"
     ],
     "excluded_extensions": [
         ".pyc",
@@ -97,7 +99,11 @@ DEFAULT_CONFIG = {
         ".orig",
         ".embedding",
         ".npy",
-        ".mermaid"
+        ".mermaid",
+        ".roomodes",
+        ".env",
+        ".clinerules",
+        ".clinerules.config.json"
     ],
     "thresholds": {"doc_similarity": 0.65, "code_similarity": 0.7},
     "models": {
@@ -122,7 +128,9 @@ DEFAULT_CONFIG = {
         "*_module.md",
         "implementation_plan_*.md",
         "*_task.md",
-        "*-checkpoint.md"
+        "*-checkpoint.md",
+        "*debug.txt",
+        "*suggestions.log"
     ],
     "visualization": {
         "auto_generate_on_analyze": True, # Enable auto-generation by default
