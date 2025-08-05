@@ -28,6 +28,22 @@ from cline_utils.dependency_system.core.key_manager import (
 import logging
 logger = logging.getLogger(__name__)
 
+def _safe_log(s: str) -> str:
+    """
+    Ensure log messages are safely encodable on Windows cp1252 consoles.
+    Falls back to unicode_escape for any characters not encodable.
+    """
+    try:
+        # Attempt to encode with the likely Windows code page; adjust if needed
+        s.encode("cp1252")
+        return s
+    except Exception:
+        try:
+            return s.encode("unicode_escape").decode("ascii")
+        except Exception:
+            # Last resort: replace errors during encoding
+            return s.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+
 # Default model configuration
 DEFAULT_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 MODEL_INSTANCE = None
@@ -95,7 +111,7 @@ def _preprocess_content_for_embedding(file_path: str, content: str) -> str:
                 segment = None
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)): segment = ast.get_source_segment(content, node)
                 if segment: weighted_definitions.extend([segment, segment]) # Weighting
-        except Exception as e: logger.warning(f"AST weighting failed for {file_path}: {e}. Proceeding without.")
+        except Exception as e: logger.warning(_safe_log(f"AST weighting failed for {file_path}: {e}. Proceeding without."))
         final_content_list = filtered_lines + weighted_definitions
         return "\n".join(final_content_list)
     # TODO: Add preprocessing for other file types if needed (e.g., remove boilerplate HTML/JS?)
@@ -141,15 +157,15 @@ def generate_embeddings(project_paths: List[str],
         project_embeddings_dir = normalize_path(os.path.join(embeddings_dir, project_name)) # This subdir approach might be redundant now? Check if needed.
         metadata_file = normalize_path(os.path.join(project_embeddings_dir, "metadata.json")) # If using mirrored structure, maybe one metadata file at base embeddings_dir?
         os.makedirs(project_embeddings_dir, exist_ok=True) # Keep for now if subdirs are used for something else
-        logger.info(f"Processing embeddings for files under: {current_project_path}")
+        logger.info(_safe_log(f"Processing embeddings for files under: {current_project_path}"))
 
         # Load existing metadata (unchanged logic)
         existing_metadata = {}
         if not force and os.path.exists(metadata_file):
             try:
                 with open(metadata_file, 'r', encoding='utf-8') as f: existing_metadata = json.load(f)
-                if existing_metadata.get("version") != "1.0": logger.warning(f"Incompatible metadata version in {metadata_file}. Regenerating."); existing_metadata = {}
-            except Exception as e: logger.warning(f"Corrupted/missing metadata {metadata_file}: {e}. Regenerating."); existing_metadata = {}
+                if existing_metadata.get("version") != "1.0": logger.warning(_safe_log(f"Incompatible metadata version in {metadata_file}. Regenerating.")); existing_metadata = {}
+            except Exception as e: logger.warning(_safe_log(f"Corrupted/missing metadata {metadata_file}: {e}. Regenerating.")); existing_metadata = {}
 
         # --- Filter path_to_key_info for the current path ---
         # <<< *** MODIFIED FILTERING *** >>>
@@ -159,7 +175,7 @@ def generate_embeddings(project_paths: List[str],
         }
 
         if not key_info_for_current_path:
-            logger.warning(f"No files found via path_to_key_info within path: {current_project_path}")
+            logger.warning(_safe_log(f"No files found via path_to_key_info within path: {current_project_path}"))
             continue
 
         # --- Read file contents (batch read could optimize) ---
@@ -169,17 +185,17 @@ def generate_embeddings(project_paths: List[str],
             abs_file_path = key_info.norm_path # Already normalized absolute path
             key_string = key_info.key_string
             if not os.path.isfile(abs_file_path):
-                 logger.warning(f"Path is not a file: {abs_file_path} for key {key_string}. Skipping read.")
+                 logger.warning(_safe_log(f"Path is not a file: {abs_file_path} for key {key_string}. Skipping read."))
                  continue
             try:
                 is_binary = False; # (Binary check unchanged)
                 with open(abs_file_path, 'rb') as f_check:
                     if b'\0' in f_check.read(1024): is_binary = True
-                if is_binary: logger.debug(f"Skipping binary file: {abs_file_path}"); continue
+                if is_binary: logger.debug(_safe_log(f"Skipping binary file: {abs_file_path}")); continue
                 # Read content
                 with open(abs_file_path, 'r', encoding='utf-8') as f: file_contents[key_string] = f.read()
-            except UnicodeDecodeError: logger.debug(f"Skipping non-UTF8 file: {abs_file_path}")
-            except Exception as e: logger.warning(f"Failed to read {abs_file_path}: {e}")
+            except UnicodeDecodeError: logger.debug(_safe_log(f"Skipping non-UTF8 file: {abs_file_path}"))
+            except Exception as e: logger.warning(_safe_log(f"Failed to read {abs_file_path}: {e}"))
 
         # --- Generate or load embeddings ---
         # <<< *** MODIFIED ITERATION AND CHECKS *** >>>
@@ -191,10 +207,10 @@ def generate_embeddings(project_paths: List[str],
             abs_file_path = key_info.norm_path # Use path from KeyInfo
 
             if not os.path.exists(abs_file_path): # Re-check existence
-                logger.debug(f"Skipping key {key_string} as file path {abs_file_path} does not exist.")
+                logger.debug(_safe_log(f"Skipping key {key_string} as file path {abs_file_path} does not exist."))
                 continue
             if not _is_valid_file(abs_file_path): # Check exclusions
-                logger.debug(f"Skipping excluded/invalid file: {abs_file_path}")
+                logger.debug(_safe_log(f"Skipping excluded/invalid file: {abs_file_path}"))
                 continue
 
             should_generate = True
@@ -211,13 +227,13 @@ def generate_embeddings(project_paths: List[str],
                     try:
                         current_mtime = os.path.getmtime(abs_file_path)
                         metadata_mtime = metadata_key_entry.get("mtime")
-                        logger.debug(f"Checking mtime {key_string}: Current={current_mtime}, Meta={metadata_mtime}")
+                        logger.debug(_safe_log(f"Checking mtime {key_string}: Current={current_mtime}, Meta={metadata_mtime}"))
                         if metadata_mtime is not None and current_mtime == metadata_mtime:
-                            logger.debug(f"  MTime match. Skipping generation for {key_string}.")
+                            logger.debug(_safe_log(f"  MTime match. Skipping generation for {key_string}."))
                             should_generate = False
                             keys_skipped_mtime_this_pass.add(key_string) # Track skip
-                        elif metadata_mtime is None: logger.debug(f"  Meta mtime missing. Regen {key_string}.")
-                        else: logger.debug(f"  MTime mismatch. Regen {key_string}.")
+                        elif metadata_mtime is None: logger.debug(_safe_log(f"  Meta mtime missing. Regen {key_string}."))
+                        else: logger.debug(_safe_log(f"  MTime mismatch. Regen {key_string}."))
                     except FileNotFoundError: logger.warning(f"Source file {abs_file_path} gone. Skip {key_string}."); should_generate = False
                     except Exception as e: logger.warning(f"Mtime check failed for {key_string}: {e}. Regen."); should_generate = True
                 else: logger.debug(f"NPY not found {mirrored_npy_path}. Gen {key_string}."); should_generate = True
@@ -235,6 +251,7 @@ def generate_embeddings(project_paths: List[str],
                         current_embeddings[key_string] = embedding
                         logger.debug(f"Encoding successful for key: {key_string}.")
                         # Save using mirrored structure (logic unchanged, uses abs_file_path)
+                        save_path = None
                         try:
                             relative_file_path = os.path.relpath(abs_file_path, project_root)
                             # Construct mirrored path under embeddings_dir (base embeddings dir)
@@ -243,11 +260,14 @@ def generate_embeddings(project_paths: List[str],
                             # Ensure the mirrored directory exists
                             os.makedirs(mirrored_dir, exist_ok=True)
                             save_path = normalize_path(mirrored_path_base + ".npy")
-                            logger.debug(f"Saving embedding for {key_string} to {save_path}...")
+                            logger.debug(_safe_log(f"Saving embedding for {key_string} to {save_path}..."))
                             np.save(save_path, embedding)
-                            logger.info(f"Generated/saved embedding for {key_string} to {save_path}")
-                        except Exception as e: logger.error(f"Failed save embedding {key_string} ({abs_file_path}) to {save_path}: {e}"); overall_success = False
-                    except Exception as e: logger.error(f"Failed generate embedding {key_string} ({abs_file_path}): {e}"); overall_success = False
+                            logger.info(_safe_log(f"Generated/saved embedding for {key_string} to {save_path}"))
+                        except Exception as e:
+                            target_display = save_path if save_path else "<unknown-path>"
+                            logger.error(_safe_log(f"Failed save embedding {key_string} ({abs_file_path}) to {target_display}: {e}"))
+                            overall_success = False
+                    except Exception as e: logger.error(_safe_log(f"Failed generate embedding {key_string} ({abs_file_path}): {e}")); overall_success = False
                 else: logger.debug(f"Skipping empty file content for key {key_string} ({abs_file_path})")
 
         # Update the global skip set
