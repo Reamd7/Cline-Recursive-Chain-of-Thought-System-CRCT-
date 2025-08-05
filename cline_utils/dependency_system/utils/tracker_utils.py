@@ -23,34 +23,72 @@ def resolve_key_global_instance_to_ki(
     current_global_path_to_key_info: Dict[str, KeyInfo] 
 ) -> Optional[KeyInfo]:
     """
-    Resolves a KEY#global_instance string to a specific KeyInfo object
+    Resolves a KEY or KEY#global_instance string to a specific KeyInfo object
     from the provided current_global_path_to_key_info.
+
+    Now that global_key_map.json stores KEY#GI for duplicates, this function:
+      1) Normalizes inputs that may have been double-suffixed (e.g. '2Aa#2#1' -> '2Aa#2').
+      2) If the normalized string contains a GI suffix, attempts exact match on key_string.
+      3) Otherwise falls back to the old behavior (base key + position) for compatibility.
     """
+    if not key_hash_instance_str:
+        return None
+
+    # Normalize any accidental double-suffix like KEY#2#1 -> KEY#2
     parts = key_hash_instance_str.split('#')
-    base_key = parts[0]
-    instance_num = 1 
-    if len(parts) > 1:
-        try: 
-            instance_num = int(parts[1])
-            if instance_num <= 0: 
-                logger.warning(f"TrackerUtils.ResolveKI: Invalid instance num {instance_num} in '{key_hash_instance_str}'.")
-                return None
-        except ValueError: 
-            logger.warning(f"TrackerUtils.ResolveKI: Invalid instance format in '{key_hash_instance_str}'.")
+    if len(parts) > 2:
+        # Keep only the first suffix as the true GI
+        normalized = f"{parts[0]}#{parts[1]}"
+    else:
+        normalized = key_hash_instance_str
+
+    # If normalized has an explicit GI suffix, attempt exact lookup
+    if '#' in normalized:
+        # Direct exact match on KeyInfo.key_string as persisted
+        exact_matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == normalized]
+        if exact_matches:
+            # Should be unique; return the first
+            return exact_matches[0]
+        # Fall back to base-key positional logic if exact not found (defensive)
+        base_key = normalized.split('#', 1)[0]
+        try:
+            instance_num = int(normalized.split('#', 1)[1])
+        except ValueError:
+            logger.warning(f"TrackerUtils.ResolveKI: Invalid GI in '{key_hash_instance_str}'.")
             return None
-    
-    matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == base_key]
-    if not matches:
+        matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string.startswith(base_key)]
+        # But since the map is GI-persisted, base_key entries should be unique or with #n.
+        # Prefer exact base-only equality when present:
+        base_only_matches = [ki for ki in matches if ki.key_string == base_key]
+        if base_only_matches:
+            # If user addressed base-only and there is only one, it's unique
+            return base_only_matches[0]
+        # Otherwise, reproduce positional behavior over items with the same base (strip GI for compare)
+        same_base = [ki for ki in current_global_path_to_key_info.values() if ki.key_string.split('#', 1)[0] == base_key]
+        if not same_base:
+            logger.warning(f"TrackerUtils.ResolveKI: Base key '{base_key}' (from '{key_hash_instance_str}') has no KeyInfo entries in global map.")
+            return None
+        same_base.sort(key=lambda k_sort: k_sort.norm_path)
+        if 0 < instance_num <= len(same_base):
+            return same_base[instance_num - 1]
+        logger.warning(f"TrackerUtils.ResolveKI: Global instance {key_hash_instance_str} out of bounds (max {len(same_base)} for key '{base_key}').")
+        return None
+
+    # Legacy behavior: input is a base key without GI. If unique in the map, return it.
+    base_key = normalized
+    exact_base_matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == base_key]
+    if exact_base_matches:
+        # Unique (should be only one)
+        return exact_base_matches[0]
+
+    # Otherwise, use positional resolution among items with same base (strip GI)
+    same_base = [ki for ki in current_global_path_to_key_info.values() if ki.key_string.split('#', 1)[0] == base_key]
+    if not same_base:
         logger.warning(f"TrackerUtils.ResolveKI: Base key '{base_key}' (from '{key_hash_instance_str}') has no KeyInfo entries in global map.")
         return None
-    
-    matches.sort(key=lambda k_sort: k_sort.norm_path) 
-            
-    if 0 < instance_num <= len(matches):
-        return matches[instance_num - 1]
-    
-    logger.warning(f"TrackerUtils.ResolveKI: Global instance {key_hash_instance_str} out of bounds (max {len(matches)} for key '{base_key}').")
-    return None
+    same_base.sort(key=lambda k_sort: k_sort.norm_path)
+    # Default to first instance when user didn't specify GI (compat)
+    return same_base[0]
 
 # (This was moved from project_analyzer.py and made more generic)
 # It's placed here because tracker_io will also need it.
@@ -70,49 +108,41 @@ def get_key_global_instance_string(
     base_key_to_sorted_KIs_cache: Optional[Dict[str, List[KeyInfo]]] = None 
 ) -> Optional[str]:
     """
-    Determines the KEY#global_instance string for a given KeyInfo object
-    based on its order within all KeyInfos sharing the same base key string
-    in the provided current_global_path_to_key_info.
-    Uses a provided cache or a module-level cache.
+    Returns the persisted KEY or KEY#GI for the given KeyInfo.
+
+    Behavior with GI-persisted map:
+      - If ki_obj_to_format.key_string already contains '#', return it as-is.
+      - If not, but there are multiple KIs sharing the same base (by stripping '#'), compute position and append '#n'.
+      - If it's globally unique, return the base key without suffix.
     """
     if not ki_obj_to_format:
         logger.warning("TrackerUtils.GetGlobalInstanceString: Received None for ki_obj_to_format.")
         return None
 
-    # Use the provided cache if available, otherwise the module-level one
-    cache_to_use = base_key_to_sorted_KIs_cache if base_key_to_sorted_KIs_cache is not None \
-                   else _module_level_base_key_to_sorted_KIs_cache
+    current_key = ki_obj_to_format.key_string
+    # If already contains GI (persisted) just return it
+    if '#' in current_key:
+        return current_key
 
-    base_key = ki_obj_to_format.key_string
-    if base_key not in cache_to_use: # Populate cache if miss
-        matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == base_key]
-        if not matches: 
-            logger.error(f"TrackerUtils.GetGlobalInstanceString: Base key '{base_key}' for KI '{ki_obj_to_format.norm_path}' not found in global map. Cannot generate GI string.")
-            return None # Cannot proceed if base_key has no matches
-        matches.sort(key=lambda k_sort: k_sort.norm_path)
-        cache_to_use[base_key] = matches
-    
-    sorted_matches = cache_to_use.get(base_key) # Use .get() for safety, though it should be populated
-    if not sorted_matches: 
-        # This case should ideally not be hit if the above logic is correct
-        logger.error(f"TrackerUtils.GetGlobalInstanceString: Base key '{base_key}' for KI '{ki_obj_to_format.norm_path}' not found in cache after attempting population.")
+    # Otherwise, compute based on current global map contents
+    base_key = current_key.split('#', 1)[0]
+    same_base = [ki for ki in current_global_path_to_key_info.values() if ki.key_string.split('#', 1)[0] == base_key]
+    if not same_base:
+        logger.error(f"TrackerUtils.GetGlobalInstanceString: Base key '{base_key}' for KI '{ki_obj_to_format.norm_path}' not found in global map.")
         return None
-        
-    try:
-        # Find the index of the specific KeyInfo object by its unique normalized path
-        instance_num = -1
-        for i, match_ki in enumerate(sorted_matches):
-            if match_ki.norm_path == ki_obj_to_format.norm_path:
-                instance_num = i + 1
-                break
-        
-        if instance_num == -1: # Should not happen if ki_obj_to_format is valid and from current_global_path_to_key_info
-            logger.error(f"TrackerUtils.GetGlobalInstanceString: Could not find KI {ki_obj_to_format.norm_path} (Key: {base_key}) in its own sorted list of global matches. List: {[m.norm_path for m in sorted_matches]}")
-            return None
-        return f"{base_key}#{instance_num}"
-    except Exception as e: # Catch any unexpected errors during list processing
-        logger.error(f"TrackerUtils.GetGlobalInstanceString: Unexpected error finding instance for KI {ki_obj_to_format.norm_path} (Key: {base_key}) in its own sorted list of global matches. Matches found: {[m.norm_path for m in matches]}", exc_info=True)
-        return None
+
+    if len(same_base) == 1:
+        # unique: return base key as-is
+        return base_key
+
+    # Multiple instances: determine deterministic position by norm_path
+    same_base.sort(key=lambda k_sort: k_sort.norm_path)
+    for i, match_ki in enumerate(same_base, start=1):
+        if match_ki.norm_path == ki_obj_to_format.norm_path:
+            return f"{base_key}#{i}"
+
+    logger.error(f"TrackerUtils.GetGlobalInstanceString: Could not match KI '{ki_obj_to_format.norm_path}' in same-base list for '{base_key}'.")
+    return None
 
 def get_globally_resolved_key_info_for_cli( 
     base_key_str: str, 
@@ -327,45 +357,45 @@ def aggregate_all_dependencies(
 
     logger.info(f"Aggregating dependencies (outputting KEY#global_instance) from {len(tracker_paths)} trackers...")
 
-    for tracker_file_path in tracker_paths:
+    # Parallelize per-tracker aggregation to increase throughput
+    from cline_utils.dependency_system.utils.batch_processor import BatchProcessor
+
+    def _aggregate_single_tracker(tracker_file_path: str) -> Dict[Tuple[str, str], Tuple[str, Set[str]]]:
+        local_links: Dict[Tuple[str, str], Tuple[str, Set[str]]] = {}
         logger.debug(f"Aggregation: Processing tracker {os.path.basename(tracker_file_path)}")
         tracker_data = read_tracker_file_structured(tracker_file_path) 
         
-        definitions_ordered_from_file = tracker_data["definitions_ordered"] # List[Tuple[key_str_in_file, path_str_in_file]]
-        grid_headers_from_file = tracker_data["grid_headers_ordered"]       # List[key_str_in_file]
-        grid_rows_from_file = tracker_data["grid_rows_ordered"]             # List[Tuple[row_label_str_in_file, compressed_data_str]]
+        definitions_ordered_from_file = tracker_data["definitions_ordered"]
+        grid_headers_from_file = tracker_data["grid_headers_ordered"]
+        grid_rows_from_file = tracker_data["grid_rows_ordered"]
 
         if not definitions_ordered_from_file or not grid_rows_from_file:
             logger.debug(f"Aggregation: Skipping empty/incomplete data in: {os.path.basename(tracker_file_path)}")
-            continue
+            return local_links
         
-        # Build an ordered list of current global KeyInfo objects corresponding to the tracker's definitions
-        # This list defines the structure of the grid being processed for *this* tracker.
+        # Build ordered KIs for this tracker
         effective_ki_list_for_this_tracker: List[Optional[KeyInfo]] = []
         for _key_in_file, path_in_file in definitions_ordered_from_file:
             mig_info = path_migration_info.get(path_in_file)
             resolved_ki_for_this_def_entry: Optional[KeyInfo] = None
-            if mig_info and mig_info[1]: # Path is stable and has a current global base key
+            if mig_info and mig_info[1]:  # has a current global base key
                 new_global_base_key = mig_info[1]
-                # Find the KeyInfo object in current_global_path_to_key_info. Prefer exact path match if key string is same.
                 resolved_ki_for_this_def_entry = next((ki for ki in current_global_path_to_key_info.values() if ki.key_string == new_global_base_key and ki.norm_path == path_in_file), None) \
-                                               or next((ki for ki in current_global_path_to_key_info.values() if ki.key_string == new_global_base_key), None) # Fallback to any path for this key
+                                               or next((ki for ki in current_global_path_to_key_info.values() if ki.key_string == new_global_base_key), None)
             effective_ki_list_for_this_tracker.append(resolved_ki_for_this_def_entry)
 
-        # Validate consistency after global resolution
         if not (len(effective_ki_list_for_this_tracker) == len(grid_headers_from_file) and \
                 len(effective_ki_list_for_this_tracker) == len(grid_rows_from_file)):
             logger.warning(f"Aggregation: Tracker '{os.path.basename(tracker_file_path)}' has inconsistent structure after global validation. "
                            f"Effective KIs: {len(effective_ki_list_for_this_tracker)}, File Headers: {len(grid_headers_from_file)}, File Rows: {len(grid_rows_from_file)}. "
                            "Skipping this tracker.")
-            continue
+            return local_links
         
         for row_idx, (_row_label_in_file, compressed_row_str) in enumerate(grid_rows_from_file):
             source_ki_global = effective_ki_list_for_this_tracker[row_idx]
-            if not source_ki_global: # Path for this row wasn't globally stable/valid or KI not found
+            if not source_ki_global:
                 continue 
             
-            # Use the helper now in this file
             source_key_gi_str = get_key_global_instance_string(source_ki_global, current_global_path_to_key_info)
             if not source_key_gi_str:
                 logger.warning(f"Aggregation: Could not get global instance for source path {source_ki_global.norm_path} from {os.path.basename(tracker_file_path)}. Skipping row.")
@@ -374,21 +404,19 @@ def aggregate_all_dependencies(
             try:
                 decompressed_row_chars = decompress(compressed_row_str)
                 if len(decompressed_row_chars) != len(effective_ki_list_for_this_tracker):
-                     logger.warning(f"Aggregation: Row {row_idx} (source KI: {source_key_gi_str}) in {os.path.basename(tracker_file_path)} "
-                                    f"has decompressed length {len(decompressed_row_chars)}, expected {len(effective_ki_list_for_this_tracker)}. Skipping row.")
-                     continue
+                    logger.warning(f"Aggregation: Row {row_idx} (source KI: {source_key_gi_str}) in {os.path.basename(tracker_file_path)} "
+                                   f"has decompressed length {len(decompressed_row_chars)}, expected {len(effective_ki_list_for_this_tracker)}. Skipping row.")
+                    continue
 
                 for col_idx, dep_char_val in enumerate(decompressed_row_chars):
-                    if dep_char_val == DIAGONAL_CHAR or dep_char_val == EMPTY_CHAR: continue
-                    
-                    target_ki_global = effective_ki_list_for_this_tracker[col_idx]
-                    if not target_ki_global: # Path for this col wasn't globally stable/valid
+                    if dep_char_val == DIAGONAL_CHAR or dep_char_val == EMPTY_CHAR:
                         continue
                     
-                    # Critical check: ensure we are not creating self-loops for the *same actual item*
-                    if source_ki_global.norm_path == target_ki_global.norm_path: 
-                        # This should ideally be caught by DIAGONAL_CHAR, but direct path check is safer
-                        # if keys might be duplicated for the same path (which shouldn't happen for global KIs).
+                    target_ki_global = effective_ki_list_for_this_tracker[col_idx]
+                    if not target_ki_global:
+                        continue
+                    
+                    if source_ki_global.norm_path == target_ki_global.norm_path:
                         continue
 
                     target_key_gi_str = get_key_global_instance_string(target_ki_global, current_global_path_to_key_info)
@@ -396,30 +424,90 @@ def aggregate_all_dependencies(
                         logger.warning(f"Aggregation: Could not get global instance for target path {target_ki_global.norm_path} from {os.path.basename(tracker_file_path)}. Skipping cell.")
                         continue
                     
-                    current_link_gi = (source_key_gi_str, target_key_gi_str) # Now a KEY#GI to KEY#GI link
-                    existing_char, existing_origins = aggregated_links.get(current_link_gi, (None, set()))
-
+                    link = (source_key_gi_str, target_key_gi_str)
+                    existing_char, existing_origins = local_links.get(link, (None, set()))
                     try:
                         current_priority = get_priority_from_char(dep_char_val)
                         existing_priority = get_priority_from_char(existing_char) if existing_char else -1
-                    except KeyError: 
-                        logger.warning(f"Aggregation: Invalid dep char '{dep_char_val}' in {os.path.basename(tracker_file_path)}. Skipping cell for link {source_key_gi_str} -> {target_key_gi_str}."); 
+                    except KeyError:
+                        logger.warning(f"Aggregation: Invalid dep char '{dep_char_val}' in {os.path.basename(tracker_file_path)}. Skipping {link}.")
                         continue
 
                     if current_priority > existing_priority:
-                        aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path})
+                        # Ensure type is Tuple[str, Set[str]]
+                        local_links[link] = (str(dep_char_val), {tracker_file_path})
                     elif current_priority == existing_priority:
-                        if dep_char_val == existing_char: 
-                            existing_origins.add(tracker_file_path) # No need to reassign tuple if set is mutable
-                        elif existing_char == 'n': 
-                            pass # Keep 'n' if new char has same priority but isn't 'n'
-                        elif dep_char_val == 'n': # New char is 'n' and has same priority as existing non-'n'
-                            aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path}) # 'n' overwrites
-                        else: # Different chars, same priority, neither is 'n' - current tracker file "wins"
-                            aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path})
-                            logger.debug(f"Aggregation conflict (same priority): {current_link_gi} was '{existing_char}', overwritten by '{dep_char_val}' from {os.path.basename(tracker_file_path)}.")
+                        if existing_char is not None and dep_char_val == existing_char:
+                            existing_origins.add(tracker_file_path)
+                            local_links[link] = (str(existing_char), set(existing_origins))
+                        elif existing_char == 'n':
+                            # keep existing 'n'
+                            pass
+                        elif dep_char_val == 'n':
+                            local_links[link] = ('n', {tracker_file_path})
+                        else:
+                            local_links[link] = (str(dep_char_val), {tracker_file_path})
+                            logger.debug(f"Aggregation conflict (same priority): {link} was '{existing_char}', overwritten by '{dep_char_val}' from {os.path.basename(tracker_file_path)}.")
             except Exception as e_agg_row:
-                logger.warning(f"Aggregation: Error processing row {row_idx} for source KI {source_key_gi_str} in {os.path.basename(tracker_file_path)}: {e_agg_row}", exc_info=False) # Less verbose exc_info
+                logger.warning(f"Aggregation: Error processing row {row_idx} for source KI {source_key_gi_str} in {os.path.basename(tracker_file_path)}: {e_agg_row}", exc_info=False)
+        return local_links
+
+    # Run per-tracker aggregation in parallel
+    tracker_list = list(tracker_paths)
+
+    # Heuristic tuning: balance workers and batch size to avoid tiny batches with many workers
+    import os, math
+    # Reduce worker oversubscription to mitigate cache contention and scheduling overhead
+    logical_cpus = (os.cpu_count() or 8)
+    cpu_workers = max(4, min(16, logical_cpus))  # clamp 4..16 to avoid thrashing
+    total = len(tracker_list)
+    # Target batches ~= workers*k, where k in [1, 8], then compute batch size within [8, 64]
+    target_batches = max(cpu_workers, min(8 * cpu_workers, total)) if total > 0 else cpu_workers
+    computed_batch_size = max(8, min(64, math.ceil(total / target_batches))) if total > 0 else 8
+
+    processor = BatchProcessor(max_workers=cpu_workers, batch_size=computed_batch_size, show_progress=True)
+    per_tracker_results = processor.process_items(tracker_list, _aggregate_single_tracker)
+
+    # Merge results
+    for local_links in per_tracker_results:
+        for link, (char_val, origins) in local_links.items():
+            # Normalize existing entry types explicitly and ensure we never assign None
+            existing_entry = aggregated_links.get(link)
+
+            # Current char is always a concrete str from local_links
+            current_char: str = str(char_val)
+
+            if existing_entry is None:
+                existing_char_str: str = ''  # sentinel for "no existing"
+                existing_origins: Set[str] = set()
+                existing_priority = -1
+            else:
+                e_char, e_origins = existing_entry  # e_char: str, e_origins: Set[str]
+                existing_char_str = e_char
+                existing_origins = set(e_origins)
+                try:
+                    existing_priority = get_priority_from_char(existing_char_str)
+                except KeyError:
+                    existing_priority = -1
+
+            try:
+                current_priority = get_priority_from_char(current_char)
+            except KeyError:
+                continue
+
+            if current_priority > existing_priority:
+                aggregated_links[link] = (str(current_char), set(origins))
+            elif current_priority == existing_priority:
+                if existing_char_str != '' and existing_char_str == current_char:
+                    merged: Set[str] = existing_origins.union(set(origins))
+                    aggregated_links[link] = (str(current_char), merged)
+                elif existing_char_str == 'n':
+                    # keep existing 'n'
+                    pass
+                elif current_char == 'n':
+                    aggregated_links[link] = ('n', set(origins))
+                else:
+                    aggregated_links[link] = (str(current_char), set(origins))
 
     logger.info(f"Aggregation complete. Found {len(aggregated_links)} unique KEY#global_instance directed links.")
     return aggregated_links

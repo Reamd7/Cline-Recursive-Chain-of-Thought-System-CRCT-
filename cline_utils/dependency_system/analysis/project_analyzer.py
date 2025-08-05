@@ -119,8 +119,8 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         # Call generate_keys using the module reference
         path_to_key_info, newly_generated_keys = key_manager.generate_keys(
             all_roots_rel, # Use this variable name
-            excluded_dirs=excluded_dirs_rel, # Pass specific lists from config
-            excluded_extensions=list(excluded_extensions), # Pass specific lists from config (ensure list for type hint if generate_keys expects List)
+            excluded_dirs=set(excluded_dirs_rel) if isinstance(excluded_dirs_rel, list) else excluded_dirs_rel,
+            excluded_extensions=set(excluded_extensions) if not isinstance(excluded_extensions, set) else excluded_extensions,
             precomputed_excluded_paths=all_excluded_paths_abs_set
         )
         analysis_results["key_generation"]["count"] = len(path_to_key_info)
@@ -290,51 +290,61 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     analyzed_file_paths = list(file_analysis_results.keys())
     # Use configured threshold for doc_similarity
     doc_similarity_threshold = config.get_threshold("doc_similarity")
+    
+    # PERFORMANCE: process suggestions in parallel using BatchProcessor to increase throughput
+    # Build a lightweight wrapper to call suggest_dependencies for a single file
+    def _suggest_wrapper(single_file_path: str, *, path_to_key_info_map, project_root_abs, file_analysis_blob, doc_threshold) -> Tuple[str, List[Tuple[str, str]], List[Dict[str, str]]]:
+        # Returns (source_path, suggestions, ast_links)
+        try:
+            suggs, ast_links = suggest_dependencies(
+                single_file_path,
+                path_to_key_info_map,
+                project_root_abs,
+                file_analysis_blob,
+                threshold=doc_threshold
+            )
+            return (single_file_path, suggs or [], ast_links or [])
+        except Exception as e:
+            logger.error(f"Suggestion wrapper error for {single_file_path}: {e}", exc_info=True)
+            return (single_file_path, [], [])
+    
+    # Choose workers: CPU * 2, capped (BatchProcessor defaults are fine, but we pass an explicit cap)
+    suggestion_batcher = BatchProcessor(max_workers=None, batch_size=None, show_progress=True)
+    
+    # Parallel process suggestion generation
+    suggestion_results = suggestion_batcher.process_items(
+        analyzed_file_paths,
+        _suggest_wrapper,
+        path_to_key_info_map=path_to_key_info,
+        project_root_abs=project_root,
+        file_analysis_blob=file_analysis_results,
+        doc_threshold=doc_similarity_threshold
+    )
+    # Use configured threshold for doc_similarity
+    doc_similarity_threshold = config.get_threshold("doc_similarity")
 
     # --- Store the length of the last printed progress line ---
     _last_progress_message_length = 0
 
-    for i, file_path_abs in enumerate(analyzed_file_paths):
-        file_key_info = path_to_key_info.get(file_path_abs)
-        if not file_key_info:
-            logger.warning(f"No key info found for analyzed file {file_path_abs}, skipping suggestion.")
-            continue
-        
-        # --- MODIFICATION: Unpack two return values from suggest_dependencies ---
-        suggestions_for_file, ast_links_for_file = suggest_dependencies(
-            file_path_abs, 
-            path_to_key_info, 
-            project_root,
-            file_analysis_results, 
-            threshold=doc_similarity_threshold
-        )
+    # Aggregate results and print progress once
+    for i, (src_path_processed, suggestions_for_file, ast_links_for_file) in enumerate(suggestion_results):
         if suggestions_for_file:
-            all_path_based_suggestions[file_path_abs].extend(suggestions_for_file) # Use the initialized variable
+            all_path_based_suggestions[src_path_processed].extend(suggestions_for_file)
             analysis_results["dependency_suggestion"]["suggestion_count"] += len(suggestions_for_file)
-
-        # --- NEW: Collect AST links ---
         if ast_links_for_file:
             all_project_ast_links.extend(ast_links_for_file)
             analysis_results["dependency_suggestion"]["ast_link_count"] += len(ast_links_for_file)
         
-        # --- UPDATED LOGGING FOR PROGRESS (More Robust Line Clearing) ---
-        progress_percent = ((i + 1) / len(analyzed_file_paths)) * 100
+        # Single-line progress as results consolidate
+        progress_percent = ((i + 1) / max(1, len(suggestion_results))) * 100
         current_suggestion_count = analysis_results["dependency_suggestion"]["suggestion_count"]
-        current_ast_link_count = analysis_results["dependency_suggestion"]["ast_link_count"] # Get current count
+        current_ast_link_count = analysis_results["dependency_suggestion"]["ast_link_count"]
         progress_message = (
-            f"Dependency Suggestion: Processed {i+1}/{len(analyzed_file_paths)} files ({progress_percent:.1f}%) - "
+            f"Dependency Suggestion (parallel): {i+1}/{len(suggestion_results)} files ({progress_percent:.1f}%) - "
             f"Found {current_suggestion_count} char suggestions, {current_ast_link_count} AST links..."
-        )        
-        # 1. Move cursor to beginning of the line
-        print(end='\r') 
-        # 2. Print spaces to overwrite the PREVIOUS message
-        print(" " * _last_progress_message_length, end='\r') 
-        # 3. Print the NEW message (cursor is already at the beginning)
-        print(progress_message, end='', flush=True) # Use flush=True for immediate output
-        
-        # 4. Update the length for the next iteration
+        )
+        print(end='\r'); print(" " * _last_progress_message_length, end='\r'); print(progress_message, end='', flush=True)
         _last_progress_message_length = len(progress_message)
-        # --- END OF UPDATED LOGGING ---
 
     # After the loop:
     # 1. Clear the last progress line
@@ -452,6 +462,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
     # --- Update Trackers ---
     logger.info("Updating trackers...")
+    # Ensure suggestions always overwrite placeholders/empty in update phase
+    # by signaling intent via force flag for suggestion-application behavior.
+    # We still let pruning and other safety logic run normally inside update_tracker.
     analysis_results["tracker_updates"]["mini"] = {} 
     analysis_results["tracker_updates"]["doc"] = "pending"
     analysis_results["tracker_updates"]["main"] = "pending"
@@ -507,7 +520,8 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
                     suggestions_external=all_global_instance_suggestions, 
                     file_to_module=file_to_module,
                     new_keys=newly_generated_keys,
-                    force_apply_suggestions=False, 
+                    # Force suggestion application so 'p' (and EMPTY) never block 's'/'S'
+                    force_apply_suggestions=True,
                     use_old_map_for_migration=old_map_existed_before_gen 
                 )
                 analysis_results["tracker_updates"]["mini"][norm_module_path] = "success"
@@ -531,7 +545,8 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
                 suggestions_external=all_global_instance_suggestions, 
                 file_to_module=file_to_module, 
                 new_keys=newly_generated_keys, 
-                force_apply_suggestions=False,
+                # Force suggestion application so 'p' (and EMPTY) never block 's'/'S'
+                force_apply_suggestions=True,
                 use_old_map_for_migration=old_map_existed_before_gen
             )
             analysis_results["tracker_updates"]["doc"] = "success"
@@ -555,7 +570,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
             tracker_type="main", 
             suggestions_external=all_global_instance_suggestions, 
             file_to_module=file_to_module,
-            new_keys=newly_generated_keys, force_apply_suggestions=False,
+            new_keys=newly_generated_keys, 
+            # Force suggestion application so 'p' (and EMPTY) never block 's'/'S'
+            force_apply_suggestions=True,
             use_old_map_for_migration=old_map_existed_before_gen
         )
         analysis_results["tracker_updates"]["main"] = "success"

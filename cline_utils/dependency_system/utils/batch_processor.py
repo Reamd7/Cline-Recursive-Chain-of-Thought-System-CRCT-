@@ -28,13 +28,15 @@ class BatchProcessor:
         Initialize the batch processor.
 
         Args:
-            max_workers: Maximum number of worker threads (defaults to CPU count * 2, capped at 32)
+            max_workers: Maximum number of worker threads (defaults to CPU count * 4, capped at 64)
             batch_size: Size of batches to process (defaults to adaptive sizing)
             show_progress: Whether to show progress information (prints to stdout)
         """
-        cpu_count = os.cpu_count() or 1
+        cpu_count = os.cpu_count() or 8
+        # Increase parallelism: use 4x CPUs by default, cap at 64 to avoid runaway threads
+        default_workers = min(64, (cpu_count * 4))
         # Ensure max_workers is at least 1
-        self.max_workers = max(1, max_workers or min(32, cpu_count * 2))
+        self.max_workers = max(1, max_workers or default_workers)
         self.batch_size = batch_size
         self.show_progress = show_progress
         self.total_items = 0
@@ -138,43 +140,40 @@ class BatchProcessor:
         """Determine adaptive batch size based on total items and workers."""
         if self.batch_size is not None:
             # If batch_size is explicitly set, use it (but ensure it's at least 1)
-            return max(1, self.batch_size)
+            return max(4, self.batch_size)
 
-        # --- Adaptive sizing ---
-        if self.total_items == 0: return 1 # Handle edge case
+        # --- Adaptive sizing (more aggressive parallelism) ---
+        if self.total_items == 0:
+            return 4  # Handle edge case
 
-        # Ensure max_workers is at least 1 for division
         effective_workers = max(1, self.max_workers)
 
-        # Define a minimum sensible batch size, perhaps related to workers?
-        # Let's try a minimum of 2 or 4 unless total items is very small.
-        min_sensible_batch = 4
+        # Favor smaller batches to keep more threads busy; minimum per worker now 8
+        min_sensible_batch = 8
         if self.total_items < effective_workers * min_sensible_batch:
-             # If total items are few, let each worker handle roughly equal small batches
-             min_batch = max(1, self.total_items // effective_workers)
+            min_batch = max(1, self.total_items // effective_workers)
         else:
-             min_batch = min_sensible_batch
+            min_batch = min_sensible_batch
 
-        # Aim for a reasonable number of batches per worker (e.g., 4-10)
-        target_batches_per_worker = 5 # Slightly lower target
-        denominator = effective_workers * target_batches_per_worker
-        calculated_batch_size = max(1, self.total_items // denominator)
+        # Increase target concurrency; aim for ~10-16 batches per worker
+        target_batches_per_worker = 12
+        denominator = max(4, effective_workers * target_batches_per_worker)
+        calculated_batch_size = max(4, self.total_items // denominator)
 
-        # Define a max batch size - avoid huge batches for large item counts
-        # Maybe limit batches to ~100-250 items max unless explicitly set?
-        max_sensible_batch = 100 # Can be adjusted
-        # Max batch should not exceed total items, and consider max_sensible_batch
+        # Allow larger caps but still finite to avoid memory spikes
+        max_sensible_batch = 256
         max_batch = min(self.total_items, max_sensible_batch)
 
-
-        # Combine calculations: ensure batch size is within min/max bounds
+        # Final batch size leaning smaller to increase utilization
         final_batch_size = min(max_batch, max(min_batch, calculated_batch_size))
-
-        # Safety check: Ensure batch size is never zero if total_items > 0
-        final_batch_size = max(1, final_batch_size)
+        final_batch_size = max(4, final_batch_size)
 
         num_batches = (self.total_items + final_batch_size - 1) // final_batch_size
-        logger.debug(f"Adaptive batch size: Total={self.total_items}, Workers={effective_workers}, TargetBatches/Worker={target_batches_per_worker} => Calculated={calculated_batch_size}, Min={min_batch}, Max={max_batch} -> Final={final_batch_size}, Batches={num_batches}")
+        logger.debug(
+            f"Adaptive batch size: Total={self.total_items}, Workers={effective_workers}, "
+            f"TargetBatches/Worker={target_batches_per_worker} => Calculated={calculated_batch_size}, "
+            f"Min={min_batch}, Max={max_batch} -> Final={final_batch_size}, Batches={num_batches}"
+        )
         return final_batch_size
 
     # <<< MODIFIED: Accept **kwargs and return Dict >>>
@@ -199,7 +198,8 @@ class BatchProcessor:
         # The executor will call partial_func(item)
         partial_func = functools.partial(processor_func, **kwargs)
 
-        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(batch))) as executor:
+        # Keep executor saturated; use full pool size (bounded by batch length)
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, max(1, len(batch)))) as executor:
             # Map future to the index within the current batch
             future_to_idx = {executor.submit(partial_func, item): i for i, item in enumerate(batch)}
 

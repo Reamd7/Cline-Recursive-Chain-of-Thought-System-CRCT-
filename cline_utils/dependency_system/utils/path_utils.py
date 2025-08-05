@@ -122,7 +122,7 @@ def get_project_root() -> str:
             key_func=lambda: f"project_root:{normalize_path(os.getcwd())}") # Key depends only on starting CWD
     def _get_project_root() -> str:
         current_dir = os.path.abspath(os.getcwd())
-        root_indicators = ['.git', '.clinerules', 'pyproject.toml', 'setup.py', 'package.json', 'Cargo.toml', 'CMakeLists.txt', '.clinerules.config.json'] # Added config file
+        root_indicators = ['project_root.cfg'] # Added config file
         # Prevent infinite loop on root (e.g., '/')
         while True:
             for indicator in root_indicators:

@@ -24,10 +24,10 @@ from cline_utils.dependency_system.core.key_manager import (
     get_sortable_parts_for_key,
     load_global_key_map,
     load_old_global_key_map,
-    validate_key as validate_key_format, 
-    sort_keys as sort_key_info_objects, # Takes List[KeyInfo], sorts by tier then key_string
-    get_key_from_path as get_key_string_from_path_global, # string from global map for a path
-    sort_key_strings_hierarchically # Takes List[str] for hierarchical string sort
+    validate_key as validate_key_format,
+    sort_keys as sort_key_info_objects,  # Takes List[KeyInfo], sorts by tier then key_string
+    get_key_from_path as get_key_string_from_path_global,  # string from global map for a path
+    sort_key_strings_hierarchically,
 )
 from cline_utils.dependency_system.core.dependency_grid import (
     compress, create_initial_grid,
@@ -954,9 +954,29 @@ def _load_ast_verified_links() -> List[Dict[str, str]]:
         if not isinstance(data, list):
             logger.error(f"AST verified links file {ast_links_path} does not contain a list. Format error.")
             return []
-        # Optionally, add more validation for the structure of dicts within the list
-        logger.info(f"Successfully loaded {len(data)} AST-verified links from {ast_links_path}.")
-        return data
+        # Normalize and deduplicate by (source_path, target_path, char)
+        normed: List[Dict[str, str]] = []
+        seen: Set[Tuple[str, str, str]] = set()
+        for entry in data:
+            if not isinstance(entry, dict): 
+                continue
+            sp = normalize_path(entry.get("source_path", "") or "")
+            tp = normalize_path(entry.get("target_path", "") or "")
+            ch = (entry.get("char", "") or "").strip()
+            if not sp or not tp or not ch:
+                continue
+            key = (sp, tp, ch)
+            if key in seen:
+                continue
+            seen.add(key)
+            # keep the same shape but with normalized paths
+            new_e = dict(entry)
+            new_e["source_path"] = sp
+            new_e["target_path"] = tp
+            new_e["char"] = ch
+            normed.append(new_e)
+        logger.info(f"Successfully loaded {len(normed)} AST-verified links from {ast_links_path} (deduplicated).")
+        return normed
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from AST verified links file {ast_links_path}: {e}")
         return [] # Corrected from pass to return []
@@ -1792,7 +1812,7 @@ def update_tracker(
                         apply_this_suggestion_to_cell = True
                         any_forced_suggestion_processed_for_metadata = True # Mark that a forced suggestion was intended
                         logger.debug(f"    Force apply active for: {src_ki_in_this_tracker.key_string} -> {tgt_ki_in_this_tracker.key_string} with '{final_char_to_set_in_grid}' (current: '{existing_char_in_grid}')")
-                elif existing_char_in_grid == PLACEHOLDER_CHAR and final_char_to_set_in_grid != PLACEHOLDER_CHAR:
+                elif existing_char_in_grid in (PLACEHOLDER_CHAR, EMPTY_CHAR) and final_char_to_set_in_grid not in (PLACEHOLDER_CHAR, EMPTY_CHAR):
                     apply_this_suggestion_to_cell = True
                 elif existing_char_in_grid != 'n': 
                     try:
@@ -1889,8 +1909,11 @@ def update_tracker(
                                 
                                 # Update if authoritative is strictly higher priority
                                 should_update_consolidate = auth_prio > curr_prio
-                                # Also update if authoritative is 'n' (verified no dep) and current is overwritable ('p','s','S')
-                                if not should_update_consolidate and authoritative_char == 'n' and current_char_in_grid in (PLACEHOLDER_CHAR, 's', 'S'):
+                                # Also update if authoritative is 'n' (verified no dep) and current is overwritable ('p','s','S','.' EMPTY)
+                                if not should_update_consolidate and authoritative_char == 'n' and current_char_in_grid in (PLACEHOLDER_CHAR, 's', 'S', EMPTY_CHAR):
+                                    should_update_consolidate = True
+                                # Also allow authoritative 's'/'S' to overwrite placeholders or empty
+                                if not should_update_consolidate and authoritative_char in ('s', 'S') and current_char_in_grid in (PLACEHOLDER_CHAR, EMPTY_CHAR):
                                     should_update_consolidate = True
                                 
                                 if should_update_consolidate:
@@ -2050,27 +2073,82 @@ def update_tracker(
 
         logger.info(f"Applying {len(ast_links)} AST-verified links to the current grid state...")
 
+        # Build map for quick path -> index resolution within this tracker's grid scope
+        path_to_final_idx: Dict[str, int] = {ki.norm_path: i for i, ki in enumerate(final_key_info_list)}
+
         for link_data in ast_links:
-            source_path_from_ast = normalize_path(link_data.get("source_path", ""))
-            target_path_from_ast = normalize_path(link_data.get("target_path", ""))
-            ast_char = link_data.get("char", "")
-            # reason = link_data.get("reason", "UnknownReason") # For more detailed logging if needed
+            # ast_links are authoritative path-based relations; use them directly
+            source_path_from_ast = normalize_path(link_data.get("source_path", "") or "")
+            target_path_from_ast = normalize_path(link_data.get("target_path", "") or "")
+            ast_char = (link_data.get("char", "") or "").strip()
+            # reason = link_data.get("reason", "UnknownReason") # optional
 
             if not source_path_from_ast or not target_path_from_ast or not ast_char:
                 logger.warning(f"AST Overrides: Skipping malformed AST link entry: {link_data}")
                 continue
 
-            # Get the KeyInfo objects for the source and target paths from the AST link data
-            source_ki_from_ast = path_to_key_info_global.get(source_path_from_ast)
-            target_ki_from_ast = path_to_key_info_global.get(target_path_from_ast)
+            # Directly locate indices in this tracker’s grid by path
+            row_idx = path_to_final_idx.get(source_path_from_ast)
+            col_idx = path_to_final_idx.get(target_path_from_ast)
 
-            if not source_ki_from_ast or not target_ki_from_ast:
-                # logger.debug(f"AST Overrides: Source or target path from AST link not in global map. Link: {source_path_from_ast} -> {target_path_from_ast}")
-                continue
-                
-            # Get the indices in the current grid (defined by final_key_info_list)
-            row_idx = path_to_final_idx.get(source_ki_from_ast.norm_path)
-            col_idx = path_to_final_idx.get(target_ki_from_ast.norm_path)
+            # If either endpoint isn’t in this tracker’s grid, auto-include foreign items per user policy (all tracker types; no guardrails)
+            if row_idx is None or col_idx is None:
+                # Attempt to include missing endpoints into this tracker’s definitions
+                # Resolve KeyInfo objects from global map using paths from AST link
+                src_ki_global = path_to_key_info_global.get(source_path_from_ast)
+                tgt_ki_global = path_to_key_info_global.get(target_path_from_ast)
+                if not src_ki_global or not tgt_ki_global:
+                    # Cannot include if not in global map; skip this link
+                    continue
+
+                # Extend final_key_info_list with any missing endpoints
+                added_any = False
+                if row_idx is None:
+                    final_key_info_list.append(src_ki_global)
+                    added_any = True
+                if col_idx is None:
+                    # Avoid duplicating if both refer to the same path
+                    if src_ki_global.norm_path != tgt_ki_global.norm_path:
+                        final_key_info_list.append(tgt_ki_global)
+                        added_any = True
+
+                if added_any:
+                    # Re-sort the list deterministically (by hierarchical key then path)
+                    final_key_info_list.sort(key=lambda ki_sort: (get_sortable_parts_for_key(ki_sort.key_string) if ki_sort.key_string else [], ki_sort.norm_path))
+                    # Rebuild path->index mapping
+                    path_to_final_idx.clear()
+                    path_to_final_idx.update({ki.norm_path: i for i, ki in enumerate(final_key_info_list)})
+
+                    # Resize temp_decomp_grid_rows to new NxN, preserving existing values
+                    old_n = len(temp_decomp_grid_rows)
+                    new_n = len(final_key_info_list)
+                    if old_n == 0:
+                        # initialize fresh grid
+                        temp_decomp_grid_rows[:] = [[PLACEHOLDER_CHAR]*new_n for _ in range(new_n)]
+                        for d in range(new_n):
+                            temp_decomp_grid_rows[d][d] = DIAGONAL_CHAR
+                    else:
+                        # build new grid and copy old into top-left
+                        new_grid = [[PLACEHOLDER_CHAR]*new_n for _ in range(new_n)]
+                        for d in range(new_n):
+                            new_grid[d][d] = DIAGONAL_CHAR
+                        # Determine old indices of paths present before expansion
+                        # We assume previous order corresponds to first old_n entries after resort; copy min-by-min
+                        lim = min(old_n, new_n)
+                        for r in range(lim):
+                            for c in range(lim):
+                                if r != c:
+                                    new_grid[r][c] = temp_decomp_grid_rows[r][c]
+                        # Replace
+                        temp_decomp_grid_rows[:] = new_grid
+
+                    # Update indices after expansion
+                    row_idx = path_to_final_idx.get(source_path_from_ast)
+                    col_idx = path_to_final_idx.get(target_path_from_ast)
+
+                # If after expansion indices are still missing, skip
+                if row_idx is None or col_idx is None:
+                    continue
 
             if row_idx is None or col_idx is None:
                 # logger.debug(f"AST Overrides: Source or target path from AST link not in current grid structure. Link: {source_path_from_ast} -> {target_path_from_ast}")
@@ -2080,42 +2158,39 @@ def update_tracker(
                 continue
 
             current_char_in_grid = temp_decomp_grid_rows[row_idx][col_idx]
-            char_to_set = current_char_in_grid # Default to no change
+            char_to_set = current_char_in_grid
             changed_this_cell = False
 
             if current_char_in_grid == 'x':
-                # 'x' is king, do not demote with a single-direction AST link.
-                # If ast_char was also 'x' (e.g. from a bidirectional structural analysis), it's no change.
-                pass
-            elif ast_char == 'x': # New AST link itself implies 'x'
+                pass  # do not demote
+            elif ast_char == 'x':
                 if current_char_in_grid != 'x':
                     char_to_set = 'x'
                     changed_this_cell = True
-            elif current_char_in_grid == 'n':
-                # AST-verified link overrides 'n'
+            elif current_char_in_grid in (PLACEHOLDER_CHAR, EMPTY_CHAR, 'n'):
+                # Always override placeholder/empty/'n' with AST char
                 char_to_set = ast_char
                 changed_this_cell = True
-                logger.info(f"AST_OVERRIDE: Grid cell ({final_key_info_list[row_idx].key_string} -> {final_key_info_list[col_idx].key_string}) was 'n', overridden by AST-verified '{ast_char}'.")
+                logger.info(f"AST_OVERRIDE: ({final_key_info_list[row_idx].norm_path} -> {final_key_info_list[col_idx].norm_path}) set to '{ast_char}' from '{current_char_in_grid}'.")
             else:
-                # Standard priority comparison for other cases
-                priority_ast = get_priority(ast_char)
-                priority_current_in_grid = get_priority(current_char_in_grid)
+                # Priority comparison for other cases
+                try:
+                    priority_ast = get_priority(ast_char)
+                    priority_current_in_grid = get_priority(current_char_in_grid)
+                except KeyError:
+                    priority_ast = 0
+                    priority_current_in_grid = 0
 
                 if priority_ast > priority_current_in_grid:
                     char_to_set = ast_char
                     changed_this_cell = True
-                elif priority_ast == priority_current_in_grid:
-                    if current_char_in_grid != ast_char: # Same priority, different chars
-                        if {current_char_in_grid, ast_char} == {'<', '>'}:
-                            char_to_set = 'x' # Form mutual
-                            changed_this_cell = True
-                        else:
-                            # Stickiness for other same-priority non-mutual conflicts is NOT applied here
-                            # because AST links are considered more definitive for their direction.
-                            # The AST-derived char wins if priorities are equal and not forming 'x'.
-                            char_to_set = ast_char
-                            changed_this_cell = True 
-                # If priority_ast < priority_current_in_grid, char_to_set remains current_char_in_grid (no change)
+                elif priority_ast == priority_current_in_grid and current_char_in_grid != ast_char:
+                    if {current_char_in_grid, ast_char} == {'<', '>'}:
+                        char_to_set = 'x'
+                        changed_this_cell = True
+                    else:
+                        char_to_set = ast_char
+                        changed_this_cell = True
             
             if changed_this_cell:
                 temp_decomp_grid_rows[row_idx][col_idx] = char_to_set

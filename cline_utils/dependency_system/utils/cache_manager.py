@@ -8,10 +8,10 @@ import os
 import time
 import re
 import json
-from typing import Dict, Any, Callable, TypeVar, Optional, List, Tuple
+from typing import Dict, Any, Callable, TypeVar, Optional, List, Tuple, cast
 import logging
 
-from .path_utils import normalize_path, get_project_root # Added get_project_root
+from .path_utils import normalize_path, get_project_root  # Added get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,10 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 # Configuration
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
-DEFAULT_MAX_SIZE = 1000  # Default max items per cache
-DEFAULT_TTL = 600  # 10 minutes in seconds
+DEFAULT_MAX_SIZE = 5000  # Default max items per cache
+DEFAULT_TTL = 300  # 10 minutes in seconds
 CACHE_SIZES = {
-    "embeddings_generation": 100,  # Smaller for heavy data
+    "embeddings_generation": 150,  # Smaller for heavy data
     "key_generation": 5000,        # Larger for key maps
     "default": DEFAULT_MAX_SIZE
 }
@@ -292,84 +292,54 @@ def tracker_modified(tracker_path: str, tracker_type: str, project_root: str, ca
         logger.debug(f"Invalidated entries for tracker '{norm_path}' (pattern '{key_pattern_for_tracker}') in cache type '{cache_type}'.")
 
 
-def cached(cache_name: str, key_func: Optional[Callable] = None, ttl: Optional[int] = DEFAULT_TTL):
+def cached(cache_name: str, key_func: Optional[Callable[..., str]] = None, ttl: Optional[int] = DEFAULT_TTL):
     """Decorator for caching with dynamic dependencies and TTL."""
     def decorator(func: F) -> F:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            effective_key_func = key_func
-            if effective_key_func is None:
-                def default_key_func_impl(*d_args, **d_kwargs):
-                    actual_args_for_key = d_args
-                    if d_args:
-                        first_arg = d_args[0]
-                        # Check if func is a method of first_arg's class or first_arg itself
-                        is_method = False
-                        try:
-                            # For instance methods
-                            if hasattr(first_arg, func.__name__) and getattr(first_arg, func.__name__).__func__ == func.__func__:
-                                is_method = True
-                        except AttributeError: # func might not have __func__ (e.g. built-in or C extension)
-                            pass
-                        if not is_method and hasattr(type(first_arg), func.__name__):
-                            # For class methods (where first_arg is cls) or instance methods called via class
-                             try:
-                                 if getattr(type(first_arg), func.__name__).__func__ == func.__func__:
-                                     is_method = True
-                             except AttributeError:
-                                 pass
-                        
-                        if is_method:
-                               actual_args_for_key = d_args[1:]
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Prefer provided key_func; otherwise use a robust default that avoids __func__ checks
+            if key_func is not None:
+                key = key_func(*args, **kwargs)
+            else:
+                # Default key: function name + stringified args/kwargs (excluding "self"/"cls" heuristically)
+                arg_list = list(args)
+                if arg_list and (arg_list[0].__class__.__name__ != 'str') and hasattr(arg_list[0], '__class__'):
+                    # Heuristic: if first arg looks like an instance/class, omit it from cache key
+                    # This avoids fragile __func__ introspection that triggers Pylance errors.
+                    arg_list_for_key = arg_list[1:]
+                else:
+                    arg_list_for_key = arg_list
+                d_key_parts = [str(a) for a in arg_list_for_key] + [f"{k}={v}" for k, v in sorted(kwargs.items())]
+                key = f"{func.__name__}::{'|'.join(d_key_parts)}"
 
-                    d_key_parts = [str(arg_item) for arg_item in actual_args_for_key] + \
-                                [f"{k_item}={v_item}" for k_item, v_item in sorted(d_kwargs.items())]
-                    return f"{func.__name__}::{'|'.join(d_key_parts)}"
-                effective_key_func = default_key_func_impl
-            
-            key = effective_key_func(*args, **kwargs)
             cache_ttl_to_use = ttl if ttl is not None else DEFAULT_TTL
             cache = cache_manager.get_cache(cache_name, cache_ttl_to_use)
-            
-            result = cache.get(key)
-            if result is not None:
-                return result
-            
+
+            cached_val = cache.get(key)
+            if cached_val is not None:
+                return cached_val
+
             result = func(*args, **kwargs)
-            
-            dependencies_list_from_result = []
-            value_to_cache = result
+
+            # Extract dependencies if function returns (value, [deps]) convention
+            dependencies_list_from_result: List[str] = []
+            value_to_cache: Any = result
             if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], list):
                 value_to_cache, dependencies_list_from_result = result
             elif func.__name__ in ['load_embedding', 'load_metadata', 'analyze_file', 'analyze_project', 'get_file_type']:
-                # Check if first arg (after potential self/cls) is an existing file path
-                actual_first_arg_for_dep = args[0] if args else None
+                # Try to infer a file path dependency from first non-self/cls argument
+                actual_first_arg_for_dep: Optional[Any] = args[0] if args else None
                 if args:
-                    first_arg = args[0]
-                    is_method = False
-                    try:
-                        if hasattr(first_arg, func.__name__) and getattr(first_arg, func.__name__).__func__ == func.__func__:
-                            is_method = True
-                    except AttributeError: pass
-                    if not is_method and hasattr(type(first_arg), func.__name__):
-                         try:
-                             if getattr(type(first_arg), func.__name__).__func__ == func.__func__:
-                                 is_method = True
-                         except AttributeError: pass
-                    
-                    if is_method: # If it's a method, the path argument is likely the second one
-                        if len(args) > 1 : actual_first_arg_for_dep = args[1]
-                        else: actual_first_arg_for_dep = None 
-                    # Else, actual_first_arg_for_dep remains args[0] (for standalone functions)
-
-                if actual_first_arg_for_dep and isinstance(actual_first_arg_for_dep, str) and os.path.exists(actual_first_arg_for_dep):
+                    # If it appears to be a method, path arg is likely the second arg
+                    if hasattr(args[0], '__class__'):
+                        actual_first_arg_for_dep = args[1] if len(args) > 1 else None
+                if isinstance(actual_first_arg_for_dep, str) and os.path.exists(actual_first_arg_for_dep):
                     dependencies_list_from_result.append(f"file:{normalize_path(actual_first_arg_for_dep)}")
-            
+
             cache.set(key, value_to_cache, dependencies_list_from_result, ttl=cache_ttl_to_use)
-            
-            cache_manager.cleanup() 
+            cache_manager.cleanup()
             return value_to_cache
-        return wrapper
+        return cast(F, wrapper)
     return decorator
 
 def check_file_modified(file_path: str) -> bool:

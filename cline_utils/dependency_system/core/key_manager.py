@@ -14,23 +14,11 @@ import json # Added for saving/loading map
 import shutil # Added for renaming
 from typing import Dict, List, Tuple, Optional, Set, NamedTuple
 from collections import defaultdict
+from copy import deepcopy
+from collections import defaultdict as _dd  # alias used for local grouping
 
-# Ensure imports resolve correctly based on project structure
-try:
-    from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
-    from cline_utils.dependency_system.utils.config_manager import ConfigManager
-
-except ImportError:
-    # Handle potential path issues if run standalone or structure changes
-    # This might require adjusting sys.path or using relative imports carefully
-    print("Warning: Potential import errors. Ensure cline_utils is in the Python path.")
-    def normalize_path(p): return os.path.normpath(p).replace("\\", "/")
-    def get_project_root(): return os.getcwd()
-    class ConfigManager:
-        def get_excluded_dirs(self): return set()
-        def get_excluded_extensions(self): return set()
-        def get_excluded_paths(self): return []
-        def get_excluded_file_patterns(self): return []
+from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
+from cline_utils.dependency_system.utils.config_manager import ConfigManager
 
 import logging
 logger = logging.getLogger(__name__)
@@ -86,6 +74,101 @@ def get_file_type_for_key(file_path: str) -> str:
     else: return "generic"
 
 
+def _strip_instance_suffix(key_str: str) -> str:
+    """Return the base key without any #instance suffix."""
+    if not key_str:
+        return key_str
+    return key_str.split("#", 1)[0]
+
+
+def _apply_global_instance_suffixes(
+    path_to_key_info: Dict[str, KeyInfo],
+    old_map: Optional[Dict[str, KeyInfo]] = None
+) -> Dict[str, KeyInfo]:
+    """
+    Ensure that for any base key that appears more than once globally,
+    each KeyInfo.key_string is suffixed with a stable '#<n>' instance number.
+    If only one occurrence exists for a base key, it remains unsuffixed.
+    Instance numbers are stabilized using the old_map whenever possible.
+    """
+    if not path_to_key_info:
+        return path_to_key_info
+
+    # Build base_key -> [KeyInfo] buckets
+    base_key_to_kis: Dict[str, List[KeyInfo]] = defaultdict(list)
+    for ki in path_to_key_info.values():
+        base_key = _strip_instance_suffix(ki.key_string)
+        base_key_to_kis[base_key].append(ki)
+
+    # Build previous path -> instance number map if old_map provided
+    prev_instance_by_path: Dict[str, int] = {}
+    if old_map:
+        for old_path, old_ki in old_map.items():
+            inst = _parse_instance_suffix(old_ki.key_string)
+            if inst is not None and inst > 0:
+                prev_instance_by_path[normalize_path(old_path)] = inst
+
+    # We will create updated KeyInfos only where necessary
+    updated_map: Dict[str, KeyInfo] = {}
+    for norm_path, ki in path_to_key_info.items():
+        updated_map[norm_path] = ki
+
+    # Process each base key bucket
+    for base_key, kis in base_key_to_kis.items():
+        # Unique base key: ensure no suffix
+        if len(kis) == 1:
+            ki = kis[0]
+            if "#" in ki.key_string:
+                # Remove suffix if it exists
+                new_ki = KeyInfo(base_key, ki.norm_path, ki.parent_path, ki.tier, ki.is_directory)
+                updated_map[ki.norm_path] = new_ki
+            continue
+
+        # Duplicated base key: assign instance numbers
+        # Use stable ordering: sort by norm_path
+        kis_sorted = sorted(kis, key=lambda k: k.norm_path)
+
+        # First, try to reuse previous instance numbers
+        assigned_instances: Dict[str, int] = {}  # path -> instance
+        used_numbers: Set[int] = set()
+        for ki in kis_sorted:
+            prev_inst = prev_instance_by_path.get(ki.norm_path)
+            if prev_inst is not None and prev_inst > 0 and prev_inst not in used_numbers:
+                assigned_instances[ki.norm_path] = prev_inst
+                used_numbers.add(prev_inst)
+
+        # Then assign remaining, using the next available positive integers
+        next_num = 1
+        for ki in kis_sorted:
+            if ki.norm_path in assigned_instances:
+                continue
+            while next_num in used_numbers:
+                next_num += 1
+            assigned_instances[ki.norm_path] = next_num
+            used_numbers.add(next_num)
+            next_num += 1
+
+        # Update KeyInfos with suffixes
+        for ki in kis_sorted:
+            inst = assigned_instances.get(ki.norm_path, None)
+            if inst is None:
+                continue
+            desired_key = f"{base_key}#{inst}"
+            if ki.key_string != desired_key:
+                new_ki = KeyInfo(desired_key, ki.norm_path, ki.parent_path, ki.tier, ki.is_directory)
+                updated_map[ki.norm_path] = new_ki
+
+    return updated_map
+
+def _parse_instance_suffix(key_str: str) -> Optional[int]:
+    """Return the instance number if present, else None."""
+    if not key_str or "#" not in key_str:
+        return None
+    try:
+        return int(key_str.split("#", 1)[1])
+    except (ValueError, IndexError):
+        return None
+
 def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = None,
                  excluded_extensions: Optional[Set[str]] = None,
                  precomputed_excluded_paths: Optional[Set[str]] = None) -> Tuple[Dict[str, KeyInfo], List[KeyInfo]]:
@@ -117,7 +200,7 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
 
     config_manager = ConfigManager()
     excluded_dirs_names = set(excluded_dirs) if excluded_dirs else config_manager.get_excluded_dirs()
-    excluded_extensions = set(excluded_extensions) if excluded_extensions else config_manager.get_excluded_extensions()
+    excluded_extensions = set(excluded_extensions) if excluded_extensions else set(config_manager.get_excluded_extensions() or [])
     project_root = get_project_root()
     absolute_excluded_dirs = {normalize_path(os.path.join(project_root, d)) for d in excluded_dirs_names}
 
@@ -217,7 +300,7 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                     if any(norm_item_path.startswith(ex_path) for ex_path in exclusion_set): # Check again for items potentially matching deeper patterns
                         logger.debug(f"Exclusion Check 1b: Skipping excluded item path: '{norm_item_path}'")
                         continue
-                    if item_name in excluded_dirs_names or item_name == ".gitkeep":
+                    if (item_name in excluded_dirs_names) or (item_name == ".gitkeep"):
                         logger.debug(f"Exclusion Check 3: Skipping item name '{item_name}' in '{norm_dir_path}'")
                         continue
                     if item_name.endswith("_module.md"):
@@ -367,8 +450,107 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     # Ensure the returned list contains unique KeyInfo objects (in case of reprocessing/overlaps)
     # Using dict.fromkeys preserves order (Python 3.7+) and ensures uniqueness based on KeyInfo equality
     # Note: KeyInfo is a tuple, so equality works as expected.
-    # --- Save the generated map ---
+    # --- Apply global instance suffixes (#GI) to duplicate base keys before saving ---
+    # Predeclare for type checkers
+    current_map_path: str = ""
     try:
+        # Establish paths early for exception handlers in this block
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        current_map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
+        old_map_path = normalize_path(os.path.join(script_dir, OLD_GLOBAL_KEY_MAP_FILENAME))
+
+        # Helper: strip any existing instance suffix to get base key
+        def _strip_instance_suffix(k: str) -> str:
+            return k.split("#", 1)[0] if isinstance(k, str) else k
+
+        # Load previous map (if any) to stabilize instance numbers across runs
+        prev_map = load_old_global_key_map() or {}
+
+        # Build base_key -> list[KeyInfo] buckets
+        base_key_to_infos: Dict[str, List[KeyInfo]] = {}
+        for ki in path_to_key_info.values():
+            base_key = _strip_instance_suffix(ki.key_string)
+            base_key_to_infos.setdefault(base_key, []).append(ki)
+
+        # Build a quick lookup of previous instance numbers by normalized path (prev path -> prev instance int)
+        prev_instance_by_path: Dict[str, int] = {}
+        for p_path, p_info in prev_map.items():
+            # p_info.key_string may already contain #n; if not, treat as base-only (no instance)
+            k = p_info.key_string
+            if "#" in k:
+                try:
+                    prev_instance_by_path[p_path] = int(k.split("#", 1)[1])
+                except ValueError:
+                    # Ignore malformed old instance strings; they'll be reassigned deterministically
+                    continue
+
+        # For each base key with duplicates, assign/reuse #GI in a stable manner
+        updated_path_to_key_info: Dict[str, KeyInfo] = {}
+        for base_key, infos in base_key_to_infos.items():
+            if len(infos) == 1:
+                # Unique globally: ensure no suffix remains
+                ki = infos[0]
+                if "#" in ki.key_string:
+                    new_key_str = base_key
+                    updated_path_to_key_info[ki.norm_path] = KeyInfo(new_key_str, ki.norm_path, ki.parent_path, ki.tier, ki.is_directory)
+                else:
+                    updated_path_to_key_info[ki.norm_path] = ki
+                continue
+
+            # Duplicates exist: assign instance numbers
+            # Sort deterministically by norm_path for any new assignments
+            infos_sorted = sorted(infos, key=lambda _ki: _ki.norm_path)
+
+            # First pass: try to reuse previous numbers
+            assigned_numbers: Dict[str, int] = {}  # norm_path -> instance number
+            used_numbers: Set[int] = set()
+            for ki in infos_sorted:
+                prev_num = prev_instance_by_path.get(ki.norm_path)
+                if prev_num and prev_num not in used_numbers:
+                    assigned_numbers[ki.norm_path] = prev_num
+                    used_numbers.add(prev_num)
+
+            # Second pass: assign remaining numbers starting from 1 upward
+            next_num = 1
+            for ki in infos_sorted:
+                if ki.norm_path in assigned_numbers:
+                    continue
+                # find next available number
+                while next_num in used_numbers:
+                    next_num += 1
+                assigned_numbers[ki.norm_path] = next_num
+                used_numbers.add(next_num)
+                next_num += 1
+
+            # Write updated KeyInfo with KEY#GI
+            for ki in infos_sorted:
+                gi = assigned_numbers[ki.norm_path]
+                new_key_str = f"{base_key}#{gi}"
+                updated_path_to_key_info[ki.norm_path] = KeyInfo(new_key_str, ki.norm_path, ki.parent_path, ki.tier, ki.is_directory)
+
+        # Merge back any unique (non-duplicate) entries that weren't processed above
+        for norm_path, ki in path_to_key_info.items():
+            if norm_path not in updated_path_to_key_info:
+                base_key = _strip_instance_suffix(ki.key_string)
+                # Ensure unique stays unsuffixed
+                if "#" in ki.key_string:
+                    updated_path_to_key_info[norm_path] = KeyInfo(base_key, ki.norm_path, ki.parent_path, ki.tier, ki.is_directory)
+                else:
+                    updated_path_to_key_info[norm_path] = ki
+
+        # Replace in-memory map
+        path_to_key_info = updated_path_to_key_info
+    except IOError as e:
+        logger.error(f"I/O Error preparing global key map prior to save at {current_map_path}: {e}", exc_info=True)
+        # Decide if this should be a critical failure or just a warning
+        raise KeyGenerationError(f"Failed to prepare global key map for save: {e}") from e
+
+    # --- Apply GLOBAL INSTANCE disambiguation before saving ---
+    try:
+        # Load previous map for stable instance reuse
+        previous_map = load_old_global_key_map()
+        path_to_key_info = _apply_global_instance_suffixes(path_to_key_info, previous_map)
+
         # Get the directory where this script (key_manager.py) resides
         script_dir = os.path.dirname(os.path.abspath(__file__))
         current_map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
@@ -383,11 +565,21 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                 logger.info(f"Renamed existing '{GLOBAL_KEY_MAP_FILENAME}' to '{OLD_GLOBAL_KEY_MAP_FILENAME}'.")
             except OSError as rename_err:
                 logger.error(f"Failed to rename '{current_map_path}' to '{old_map_path}': {rename_err}. Proceeding to save new map.")
-                # Decide if this should be a critical error. For now, log and continue.
         else:
             logger.info(f"No existing '{GLOBAL_KEY_MAP_FILENAME}' found to rename.")
 
-        # Step 2: Save the newly generated map to the current filename
+        # Step 1.5: Load previous map (if any) to stabilize instance numbering
+        previous_map: Optional[Dict[str, KeyInfo]] = None
+        try:
+            previous_map = load_old_global_key_map()
+        except Exception as _e_load_old:
+            previous_map = None
+            logger.warning(f"Could not load previous global key map for GI stabilization: {_e_load_old}")
+
+        # Step 2: Apply GI suffixes for duplicated base keys, reusing prior assignments
+        _apply_global_instance_suffixes(path_to_key_info, previous_map)
+
+        # Step 3: Save the newly generated map to the current filename
         serializable_map = {path: info._asdict() for path, info in path_to_key_info.items()}
         with open(current_map_path, 'w', encoding='utf-8') as f:
             json.dump(serializable_map, f, indent=2)
@@ -412,6 +604,8 @@ def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
         The loaded dictionary mapping normalized paths to KeyInfo objects,
         or None if the file doesn't exist or fails to load/parse.
     """
+    # Predeclare for type checkers
+    map_path: str = ""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
@@ -447,6 +641,8 @@ def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
 
 def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
     """Loads the persisted PREVIOUS global path_to_key_info map."""
+    # Predeclare for type checkers
+    map_path: str = ""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         map_path = normalize_path(os.path.join(script_dir, OLD_GLOBAL_KEY_MAP_FILENAME)) # Target old map
@@ -460,7 +656,9 @@ def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
             except TypeError as te: logger.error(f"Error converting OLD KeyInfo data for '{path}': {te}"); continue
         logger.info(f"Loaded previous global key map ({len(path_to_key_info)} entries) from: {map_path}")
         return path_to_key_info
-    except Exception as e: logger.exception(f"Unexpected error loading previous global key map: {e}"); return None
+    except Exception as e:
+        logger.exception(f"Unexpected error loading previous global key map: {e} (path: {map_path})")
+        return None
 
 def validate_key(key: str) -> bool:
     """
@@ -601,8 +799,8 @@ def sort_keys(key_info_list: List[KeyInfo]) -> List[KeyInfo]:
     return sorted(key_info_list, key=sort_key_func)
 
 
-def regenerate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
-                 excluded_extensions: Set[str] = None,
+def regenerate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = None,
+                 excluded_extensions: Optional[Set[str]] = None,
                  precomputed_excluded_paths: Optional[Set[str]] = None) -> Tuple[Dict[str, KeyInfo], List[KeyInfo]]:
     """
     Regenerates keys for the given root paths using the new contextual logic.

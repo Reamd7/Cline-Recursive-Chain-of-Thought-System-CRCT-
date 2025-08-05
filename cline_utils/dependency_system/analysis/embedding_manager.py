@@ -49,6 +49,14 @@ DEFAULT_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 MODEL_INSTANCE = None
 SELECTED_DEVICE = None
 
+# --- Similarity cache controls (tunable) ---
+# Maximum entries to retain in the similarity cache (LRU enforced in cache_manager)
+SIM_CACHE_MAXSIZE = 100_000
+# TTL in seconds for similarity cache entries (0 or None for no expiry)
+SIM_CACHE_TTL_SEC = 7 * 24 * 60 * 60  # 7 days
+# Enable negative-result caching (missing vectors, invalid keys) to avoid repeat IO
+SIM_CACHE_NEGATIVE_RESULTS = True
+
 def _get_best_device() -> str:
     """Automatically determines the best available torch device."""
     # 1. Check CUDA
@@ -308,7 +316,13 @@ def generate_embeddings(project_paths: List[str],
 def _get_similarity_cache_key(key1_str: str, key2_str: str, embeddings_dir: str,
                               path_to_key_info: Dict[str, KeyInfo], project_root: str,
                               code_roots: List[str], doc_roots: List[str], **kwargs) -> str:
-    """Generates a cache key for calculate_similarity, including .npy mtimes."""
+    """
+    Generates a cache key for calculate_similarity, including:
+      - normalized embeddings_dir
+      - normalized, hierarchically sorted keys (KEY or KEY#GI)
+      - .npy mtimes for both keys
+      - selected device and model name (in case vector dims change across models/devices)
+    """
     norm_embeddings_dir = normalize_path(embeddings_dir)
     norm_project_root = normalize_path(project_root)
 
@@ -320,29 +334,33 @@ def _get_similarity_cache_key(key1_str: str, key2_str: str, embeddings_dir: str,
         try:
             relative_file_path = os.path.relpath(key_info.norm_path, norm_project_root)
             npy_path = normalize_path(os.path.join(norm_embeddings_dir, relative_file_path) + ".npy")
-            if os.path.exists(npy_path):
-                return os.path.getmtime(npy_path)
-            else:
-                return 0.0
+            return os.path.getmtime(npy_path) if os.path.exists(npy_path) else 0.0
         except (ValueError, OSError):
-            return 0.0 # Error calculating path or getting mtime
+            return 0.0  # Error calculating path or getting mtime
 
-    # Sort keys to ensure consistent key order
-    # Use hierarchical sorting for key strings
+    # Deterministic ordering for symmetric similarity
     sorted_keys = sort_key_strings_hierarchically([key1_str, key2_str])
-    mtime1 = get_npy_mtime(sorted_keys[0])
-    mtime2 = get_npy_mtime(sorted_keys[1])
+    k1, k2 = sorted_keys[0], sorted_keys[1]
+    mtime1 = get_npy_mtime(k1)
+    mtime2 = get_npy_mtime(k2)
 
-    return f"similarity:{sorted_keys[0]}:{sorted_keys[1]}:{norm_embeddings_dir}:{mtime1}:{mtime2}"
+    # Include device and model in key to avoid cross-model contamination
+    device_tag = _select_device()
+    model_tag = DEFAULT_MODEL_NAME
+
+    return f"similarity:v2:{k1}:{k2}:{norm_embeddings_dir}:{mtime1}:{mtime2}:{device_tag}:{model_tag}"
 
 # --- Similarity Calculation ---
 # <<< *** MODIFIED SIGNATURE AND LOGIC *** >>>
-@cached("similarity_calculation",
-        key_func=_get_similarity_cache_key) # Use helper function for key generation
-def calculate_similarity(key1_str: str, # Renamed for clarity
-                         key2_str: str, # Renamed for clarity
+@cached(
+    "similarity_calculation",
+    key_func=_get_similarity_cache_key,
+    ttl=SIM_CACHE_TTL_SEC
+)
+def calculate_similarity(key1_str: str,
+                         key2_str: str,
                          embeddings_dir: str,
-                         path_to_key_info: Dict[str, KeyInfo], # Changed
+                         path_to_key_info: Dict[str, KeyInfo],
                          project_root: str,
                          code_roots: List[str],
                          doc_roots: List[str]) -> float:
@@ -406,11 +424,15 @@ def calculate_similarity(key1_str: str, # Renamed for clarity
     file2_path = get_embedding_path(key2_str)
 
     if not file1_path or not file2_path or not (os.path.exists(file1_path) and os.path.exists(file2_path)):
-        missing = []
-        if not file1_path or not (file1_path and os.path.exists(file1_path)): missing.append(file1_path or f"{key1_str}.npy (path error)")
-        if not file2_path or not (file2_path and os.path.exists(file2_path)): missing.append(file2_path or f"{key2_str}.npy (path error)")
-        relative_missing = [os.path.relpath(m, embeddings_dir) if m and os.path.isabs(m) and embeddings_dir in m else m for m in missing]
-        logger.debug(f"Embedding files missing/path error during similarity: {', '.join(relative_missing)}")
+        if SIM_CACHE_NEGATIVE_RESULTS:
+            # Log at debug to reduce noise; negative cached by decorator to prevent repeated IO
+            logger.debug(f"Similarity negative-cache: missing vectors for {key1_str} or {key2_str}.")
+        else:
+            missing = []
+            if not file1_path or not (file1_path and os.path.exists(file1_path)): missing.append(file1_path or f"{key1_str}.npy (path error)")
+            if not file2_path or not (file2_path and os.path.exists(file2_path)): missing.append(file2_path or f"{key2_str}.npy (path error)")
+            relative_missing = [os.path.relpath(m, embeddings_dir) if m and os.path.isabs(m) and embeddings_dir in m else m for m in missing]
+            logger.debug(f"Embedding files missing/path error during similarity: {', '.join(relative_missing)}")
         return 0.0
 
     # (Loading and calculation logic unchanged)
