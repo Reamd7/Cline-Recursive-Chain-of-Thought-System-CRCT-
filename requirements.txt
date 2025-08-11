@@ -7,6 +7,8 @@ tree-sitter-typescript
 accelerate
 transformers
 torch
+# For CUDA GPU support
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129
 numpy
 sentence-transformers
 jsonc-parser
