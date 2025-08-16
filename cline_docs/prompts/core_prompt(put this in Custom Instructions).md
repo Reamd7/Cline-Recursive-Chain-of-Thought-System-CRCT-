@@ -159,7 +159,7 @@ next_phase: "Set-up/Maintenance"
 
 ## III. Recursive Chain-of-Thought Loop & Plugin Workflow
 
-**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules/default-rules.md` (in the project root under the `.clinerules` directory) to determine `current_phase` and `last_action`. **Based on `next_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules/default-rules.md` indicates `next_phase: Strategy`, load `strategy_plugin.md` *in conjunction with these Custom instructions*.
+**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules/default-rules.md` (in the project root under the `.clinerules` directory) to determine `current_phase` and `last_action`. **Based on `next_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules/default-rules.md` indicates `next_phase: Strategy`, load `strategy_dispatcher_plugin.md` *in conjunction with these Custom instructions*.
 
 **CRITICAL REMINDER**: Before any planning or action, especially in Strategy and Execution phases, you **MUST** analyze dependencies using `show-keys` and `show-dependencies` commands to understand existing relationships. **Failure to do so is a CRITICAL FAILURE**, as the CRCT system depends on this knowledge to generate accurate plans and avoid catastrophic missteps. Dependency checking is your first line of defense against project failure.
 
