@@ -294,7 +294,7 @@ class ConfigManager:
             logger.exception(f"Unexpected error saving configuration to {self.config_path}: {e}")
             return False
 
-    def update_config_setting(self, key: str, value: Union[str, int, float, List, Dict]) -> bool:
+    def update_config_setting(self, key: str, value: Union[str, int, float, List[Any], Dict[str, Any]]) -> bool:
         """Update a specific configuration setting."""
         keys = key.split('.')
         current = self.config

@@ -658,7 +658,7 @@ def suggest_python_dependencies(
     all_raw_ast_links = explicit_raw_ast_links + structural_raw_ast_links # NEW
 
     # Apply priority to character-based suggestions
-    combined_suggestions = _combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
+    combined_suggestions = combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
 
     if combined_suggestions:
         logger.debug(f"Final Combined Dependencies for {norm_file_path}:")
@@ -708,7 +708,7 @@ def suggest_javascript_dependencies(file_path: str, path_to_key_info: Dict[str, 
 
     # Combine suggestions then return with union of AST links
     all_suggestions_paths = explicit_suggestions_paths + structural_suggestions_paths + semantic_suggestions_paths
-    combined_suggestions = _combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
+    combined_suggestions = combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
 
     all_raw_ast_links = explicit_raw_ast_links + structural_raw_ast_links
     return combined_suggestions, all_raw_ast_links
@@ -892,7 +892,7 @@ def suggest_documentation_dependencies(file_path: str, path_to_key_info: Dict[st
     semantic_suggestions_paths = suggest_semantic_dependencies_path_based(norm_file_path, path_to_key_info, project_root, threshold)
 
     all_suggestions_paths = explicit_deps_paths + semantic_suggestions_paths
-    return _combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
+    return combine_suggestions_path_based_with_char_priority(all_suggestions_paths, norm_file_path)
 
 def suggest_html_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
                               project_root: str, file_analysis_results: Dict[str, Any]
@@ -905,7 +905,7 @@ def suggest_html_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInf
     # Optionally add semantic for HTML if meaningful:
     # semantic_suggestions_paths = suggest_semantic_dependencies_path_based(norm_file_path, path_to_key_info, project_root, some_html_threshold)
     # all_suggestions_paths = explicit_deps_paths + semantic_suggestions_paths
-    return _combine_suggestions_path_based_with_char_priority(explicit_deps_paths, norm_file_path)
+    return combine_suggestions_path_based_with_char_priority(explicit_deps_paths, norm_file_path)
 
 def suggest_css_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
                              project_root: str, file_analysis_results: Dict[str, Any]
@@ -915,13 +915,13 @@ def suggest_css_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo
     if analysis is None or "error" in analysis or "skipped" in analysis: return []
 
     explicit_deps_paths = _identify_css_dependencies(norm_file_path, analysis, file_analysis_results, project_root, path_to_key_info)
-    return _combine_suggestions_path_based_with_char_priority(explicit_deps_paths, norm_file_path)
+    return combine_suggestions_path_based_with_char_priority(explicit_deps_paths, norm_file_path)
 
 def suggest_generic_dependencies(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
                                  project_root: str, threshold: float) -> List[Tuple[str, str]]: # Output: List[(target_norm_path, char)]
     norm_file_path = normalize_path(file_path)
     semantic_suggestions_paths = suggest_semantic_dependencies_path_based(norm_file_path, path_to_key_info, project_root, threshold)
-    return _combine_suggestions_path_based_with_char_priority(semantic_suggestions_paths, norm_file_path)
+    return combine_suggestions_path_based_with_char_priority(semantic_suggestions_paths, norm_file_path)
 
 # --- Semantic Suggestion (Adapted to return paths) ---
 def suggest_semantic_dependencies_path_based(file_path: str, path_to_key_info: Dict[str, KeyInfo], 
@@ -981,7 +981,7 @@ def suggest_semantic_dependencies_path_based(file_path: str, path_to_key_info: D
 
 
 # --- Helper Functions ---
-def _combine_suggestions_path_based_with_char_priority(
+def combine_suggestions_path_based_with_char_priority(
     suggestions_path_based: List[Tuple[str, str]], # List[(target_norm_path, char)]
     source_path_for_log: str 
     ) -> List[Tuple[str, str]]: # Output: List[(target_norm_path, char)]

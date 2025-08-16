@@ -63,8 +63,8 @@ try:
 except ImportError:
     logger.error("TrackerIO: Could not determine core directory for AST links file. Path may be incorrect.")
 
-# --- _build_path_migration_map (Keep existing as provided) ---
-def _build_path_migration_map(
+# --- build_path_migration_map (Keep existing as provided) ---
+def build_path_migration_map(
     old_global_map: Optional[Dict[str, KeyInfo]],
     new_global_map: Dict[str, KeyInfo]
 ) -> PathMigrationInfo:
@@ -1293,7 +1293,7 @@ def update_tracker(
         # End of read attempts loop
 
     try:
-        path_migration_info = _build_path_migration_map(load_old_global_key_map() if use_old_map_for_migration else None, path_to_key_info)
+        path_migration_info = build_path_migration_map(load_old_global_key_map() if use_old_map_for_migration else None, path_to_key_info)
     except ValueError as ve_migmap: 
         logger.critical(f"Path Migration Map build failed due to inconsistent global maps: {ve_migmap}. Aborting update for '{output_file_basename}'.")
         return 
@@ -2171,7 +2171,7 @@ def update_tracker(
                 # Always override placeholder/empty/'n' with AST char
                 char_to_set = ast_char
                 changed_this_cell = True
-                logger.info(f"AST_OVERRIDE: ({final_key_info_list[row_idx].norm_path} -> {final_key_info_list[col_idx].norm_path}) set to '{ast_char}' from '{current_char_in_grid}'.")
+                logger.debug(f"AST_OVERRIDE: ({final_key_info_list[row_idx].norm_path} -> {final_key_info_list[col_idx].norm_path}) set to '{ast_char}' from '{current_char_in_grid}'.")
             else:
                 # Priority comparison for other cases
                 try:

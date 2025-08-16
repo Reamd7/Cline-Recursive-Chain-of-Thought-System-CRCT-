@@ -352,11 +352,11 @@ def _get_similarity_cache_key(key1_str: str, key2_str: str, embeddings_dir: str,
 
 # --- Similarity Calculation ---
 # <<< *** MODIFIED SIGNATURE AND LOGIC *** >>>
-@cached(
-    "similarity_calculation",
-    key_func=_get_similarity_cache_key,
-    ttl=SIM_CACHE_TTL_SEC
-)
+# @cached(
+#    "similarity_calculation",
+#    key_func=_get_similarity_cache_key,
+#    ttl=SIM_CACHE_TTL_SEC
+# )
 def calculate_similarity(key1_str: str,
                          key2_str: str,
                          embeddings_dir: str,

@@ -3,6 +3,7 @@
 from collections import defaultdict
 import fnmatch
 import json
+import math
 import os
 import shutil # For managing _old.json file
 from typing import Any, Dict, Optional, List, Tuple
@@ -137,7 +138,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     old_global_map = key_manager.load_old_global_key_map() # Load old map (can be None)
     path_migration_info: PathMigrationInfo
     try:
-        path_migration_info = tracker_io._build_path_migration_map(old_global_map, path_to_key_info)
+        path_migration_info = tracker_io.build_path_migration_map(old_global_map, path_to_key_info)
     except ValueError as ve:
          logger.critical(f"Failed to build migration map during analysis: {ve}. Downstream functions may fail.")
          analysis_results["status"] = "error"; analysis_results["message"] = f"Migration map build failed: {ve}"; return analysis_results
@@ -295,22 +296,22 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # Build a lightweight wrapper to call suggest_dependencies for a single file
     def _suggest_wrapper(single_file_path: str, *, path_to_key_info_map, project_root_abs, file_analysis_blob, doc_threshold) -> Tuple[str, List[Tuple[str, str]], List[Dict[str, str]]]:
         # Returns (source_path, suggestions, ast_links)
+
         try:
             suggs, ast_links = suggest_dependencies(
                 single_file_path,
                 path_to_key_info_map,
                 project_root_abs,
                 file_analysis_blob,
-                threshold=doc_threshold
+                doc_threshold,
             )
             return (single_file_path, suggs or [], ast_links or [])
         except Exception as e:
             logger.error(f"Suggestion wrapper error for {single_file_path}: {e}", exc_info=True)
             return (single_file_path, [], [])
-    
-    # Choose workers: CPU * 2, capped (BatchProcessor defaults are fine, but we pass an explicit cap)
-    suggestion_batcher = BatchProcessor(max_workers=None, batch_size=None, show_progress=True)
-    
+
+    suggestion_batcher = BatchProcessor(show_progress=True)
+
     # Parallel process suggestion generation
     suggestion_results = suggestion_batcher.process_items(
         analyzed_file_paths,
@@ -399,10 +400,10 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- Combine suggestions within each source key using priority ---
     # This step is crucial before adding reciprocal ones
     # Import helper here to avoid potential circular dependencies at module level
-    from cline_utils.dependency_system.analysis.dependency_suggester import _combine_suggestions_path_based_with_char_priority # Needs import
+    from cline_utils.dependency_system.analysis.dependency_suggester import combine_suggestions_path_based_with_char_priority # Needs import
     combined_path_suggestions_for_conversion = defaultdict(list)
     for source_path, path_sugg_list in all_path_based_suggestions.items():
-            combined_path_suggestions_for_conversion[source_path] = _combine_suggestions_path_based_with_char_priority(path_sugg_list, source_path)
+            combined_path_suggestions_for_conversion[source_path] = combine_suggestions_path_based_with_char_priority(path_sugg_list, source_path)
     logger.debug(f"Combined path-based suggestions by priority. Count remains: {sum(len(v) for v in combined_path_suggestions_for_conversion.values())}")
 
     # --- CONVERT Path-Based Suggestions to KEY#global_instance Format ---

@@ -33,8 +33,8 @@ class BatchProcessor:
             show_progress: Whether to show progress information (prints to stdout)
         """
         cpu_count = os.cpu_count() or 8
-        # Increase parallelism: use 4x CPUs by default, cap at 64 to avoid runaway threads
-        default_workers = min(64, (cpu_count * 4))
+        # Increase parallelism: use 4x CPUs by default, cap at 48 to avoid runaway threads
+        default_workers = min(4, (cpu_count * 4))
         # Ensure max_workers is at least 1
         self.max_workers = max(1, max_workers or default_workers)
         self.batch_size = batch_size
@@ -140,11 +140,11 @@ class BatchProcessor:
         """Determine adaptive batch size based on total items and workers."""
         if self.batch_size is not None:
             # If batch_size is explicitly set, use it (but ensure it's at least 1)
-            return max(4, self.batch_size)
+            return max(8, self.batch_size)
 
         # --- Adaptive sizing (more aggressive parallelism) ---
         if self.total_items == 0:
-            return 4  # Handle edge case
+            return 8  # Handle edge case
 
         effective_workers = max(1, self.max_workers)
 
@@ -166,7 +166,7 @@ class BatchProcessor:
 
         # Final batch size leaning smaller to increase utilization
         final_batch_size = min(max_batch, max(min_batch, calculated_batch_size))
-        final_batch_size = max(4, final_batch_size)
+        final_batch_size = max(16, final_batch_size)
 
         num_batches = (self.total_items + final_batch_size - 1) // final_batch_size
         logger.debug(

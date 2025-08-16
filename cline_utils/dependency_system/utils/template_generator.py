@@ -73,7 +73,7 @@ CHECKLIST_TEMPLATE_CONTENT = f"""
 - [RECOMMENDATIONS_FOR_NEXT_CYCLE]
 """
 # --- Helper to determine if a path is code or doc ---
-def _get_item_type(item_path: str, config: ConfigManager, project_root: str) -> Optional[str]:
+def get_item_type(item_path: str, config: ConfigManager, project_root: str) -> Optional[str]:
     """Determines if a given path is a 'code' or 'doc' item based on configuration."""
     norm_item_path = normalize_path(item_path)
     code_root_dirs_abs = [normalize_path(os.path.join(project_root, cr)) for cr in config.get_code_root_directories()]
@@ -225,8 +225,8 @@ def _get_code_and_doc_files(
                 break
         if is_in_excluded_dir_name:
             continue
-        # Use _get_item_type to classify
-        item_type = _get_item_type(norm_item_path, config, project_root)
+        # Use get_item_type to classify
+        item_type = get_item_type(norm_item_path, config, project_root)
         if item_type == "code":
             code_files.append(key_info)
         elif item_type == "doc":
@@ -380,11 +380,11 @@ def generate_final_review_checklist(
     if path_migration_info_param is not None:
         path_migration_info_to_use = path_migration_info_param
     else:
-        from cline_utils.dependency_system.io.tracker_io import _build_path_migration_map # Local import
+        from cline_utils.dependency_system.io.tracker_io import build_path_migration_map # Local import
         from cline_utils.dependency_system.core.key_manager import load_old_global_key_map
         old_global_map = load_old_global_key_map()
         try:
-            path_migration_info_to_use = _build_path_migration_map(old_global_map, current_global_key_map)
+            path_migration_info_to_use = build_path_migration_map(old_global_map, current_global_key_map)
         except ValueError as ve:
             logger.error(f"Failed to build path migration map for checklist generation: {ve}")
             return False
