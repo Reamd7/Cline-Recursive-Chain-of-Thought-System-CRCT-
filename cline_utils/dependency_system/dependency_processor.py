@@ -12,7 +12,7 @@ import os
 import sys
 from collections import defaultdict
 from logging import LogRecord
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
 
@@ -494,6 +494,11 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     target_keys_arg_raw: List[str] = args.target_key
     dep_type: str = args.dep_type
 
+    # --- Import moved for early use ---
+    from cline_utils.dependency_system.io.update_doc_tracker import doc_tracker_data
+
+    # ---
+
     config = ConfigManager()
     ALLOWED_DEP_TYPES = config.get_allowed_dependency_chars() + [
         PLACEHOLDER_CHAR,
@@ -509,6 +514,14 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         f"CLI add-dependency (Global Instance Mode): User input: {source_key_arg_raw} -> {target_keys_arg_raw} ('{dep_type}') in {tracker_path}"
     )
 
+    # Determine tracker type early
+    is_mini_add = tracker_path.endswith("_module.md")
+    tracker_type_val_add = (
+        "mini"
+        if is_mini_add
+        else ("doc" if "doc_tracker.md" in os.path.basename(tracker_path) else "main")
+    )
+
     # Tracker existence check (allow non-existent for mini-trackers as update_tracker can create them)
     if not os.path.exists(tracker_path) and not tracker_path.endswith("_module.md"):
         logger.error(
@@ -522,6 +535,18 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         )
 
     global_map = _load_global_map_or_exit()  # This is path_to_key_info
+    project_root = get_project_root()
+
+    # --- Pre-filter valid paths if tracker type requires it (e.g., 'doc') ---
+    valid_paths_for_tracker: Optional[Set[str]] = None
+    if tracker_type_val_add == "doc":
+        filtered_items_map: Dict[str, KeyInfo] = doc_tracker_data["file_inclusion"](
+            project_root, global_map
+        )
+        valid_paths_for_tracker = set(filtered_items_map.keys())
+        logger.debug(
+            f"Doc tracker mode: {len(valid_paths_for_tracker)} valid doc paths identified for filtering."
+        )
 
     # --- Resolve Source Key (Globally) ---
     src_parts = source_key_arg_raw.split("#")
@@ -572,6 +597,19 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     if not resolved_source_ki:
         return 1
 
+    # --- NEW: Validate source key against tracker type ---
+    if (
+        valid_paths_for_tracker is not None
+        and resolved_source_ki.norm_path not in valid_paths_for_tracker
+    ):
+        print(
+            f"Error: Source key '{source_key_arg_raw}' ({resolved_source_ki.norm_path}) is not a valid item for the '{tracker_type_val_add}' tracker. Aborting."
+        )
+        logger.error(
+            f"Source path {resolved_source_ki.norm_path} rejected by '{tracker_type_val_add}' tracker filter."
+        )
+        return 1
+
     final_source_key_for_suggestion = get_key_global_instance_string(
         resolved_source_ki, global_map
     )
@@ -585,9 +623,10 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         f"Resolved source for suggestion: '{final_source_key_for_suggestion}' (Path: {resolved_source_ki.norm_path})"
     )
 
+    # --- NEW: Initialize lists to track valid and rejected targets ---
     final_target_keys_for_suggestion_list: List[Tuple[str, str]] = []
     checklist_updates_pending: List[Tuple[str, str, str, str, str]] = []
-    project_root = get_project_root()
+    rejected_targets: List[Tuple[str, str]] = []  # (raw_key, reason)
 
     for tgt_key_arg_item_raw in target_keys_arg_raw:
         tgt_parts = tgt_key_arg_item_raw.split("#")
@@ -600,6 +639,9 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 print(
                     f"Error: Invalid instance number format in target key '{tgt_key_arg_item_raw}'. Skipping this target."
                 )
+                rejected_targets.append(
+                    (tgt_key_arg_item_raw, "Invalid instance number format.")
+                )
                 continue
 
         matching_target_infos = [
@@ -610,6 +652,9 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         if not matching_target_infos:
             print(
                 f"Error: Base target key '{tgt_base_key_str}' not found in global key map."
+            )
+            rejected_targets.append(
+                (tgt_key_arg_item_raw, "Base key not found in global map.")
             )
             continue
 
@@ -624,6 +669,9 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 print(
                     f"Error: Target key '{tgt_key_arg_item_raw}' specifies an invalid global instance number. Max is {len(matching_target_infos)}."
                 )
+                rejected_targets.append(
+                    (tgt_key_arg_item_raw, "Invalid global instance number.")
+                )
                 continue
         elif len(matching_target_infos) > 1:
             print(
@@ -633,11 +681,30 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 print(
                     f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})  (Use as '{tgt_base_key_str}#{i+1}')"
                 )
+            rejected_targets.append((tgt_key_arg_item_raw, "Globally ambiguous key."))
             continue
         else:
             resolved_target_ki = matching_target_infos[0]
 
         if not resolved_target_ki:
+            # This case is already covered by the ambiguity/resolution logic above, but as a safeguard:
+            if (
+                tgt_key_arg_item_raw,
+                "Could not be resolved globally.",
+            ) not in rejected_targets:
+                rejected_targets.append(
+                    (tgt_key_arg_item_raw, "Could not be resolved globally.")
+                )
+            continue
+
+        # --- NEW: Validate target key against tracker type ---
+        if (
+            valid_paths_for_tracker is not None
+            and resolved_target_ki.norm_path not in valid_paths_for_tracker
+        ):
+            reason = f"Path '{resolved_target_ki.norm_path}' is not a valid item for the '{tracker_type_val_add}' tracker."
+            logger.warning(f"Rejected target '{tgt_key_arg_item_raw}': {reason}")
+            rejected_targets.append((tgt_key_arg_item_raw, reason))
             continue
 
         final_target_key_for_suggestion = get_key_global_instance_string(
@@ -649,6 +716,9 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             )
             print(
                 f"Internal error resolving target key instance for '{tgt_key_arg_item_raw}'."
+            )
+            rejected_targets.append(
+                (tgt_key_arg_item_raw, "Internal error getting global instance string.")
             )
             continue
         logger.info(
@@ -662,6 +732,7 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             )
             continue
 
+        # This target is valid, add it to the list for update_tracker
         final_target_keys_for_suggestion_list.append(
             (final_target_key_for_suggestion, dep_type)
         )
@@ -686,10 +757,15 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 )
             )
 
+    # --- After the loop, check what we have ---
     if not final_target_keys_for_suggestion_list and not checklist_updates_pending:
         print(
             "No valid dependencies resolved to apply to tracker or checklist after validation and ambiguity checks."
         )
+        if rejected_targets:
+            print("\nThe following targets were rejected:")
+            for key, reason in rejected_targets:
+                print(f"  - {key}: {reason}")
         return 0
 
     suggestions_for_update_tracker: Optional[Dict[str, List[Tuple[str, str]]]] = None
@@ -703,13 +779,6 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         for info in global_map.values()
         if not info.is_directory and info.parent_path
     }
-    is_mini_add = tracker_path.endswith("_module.md")
-    # Check basename for doc_tracker.md to correctly identify tracker type
-    tracker_type_val_add = (
-        "mini"
-        if is_mini_add
-        else ("doc" if "doc_tracker.md" in os.path.basename(tracker_path) else "main")
-    )
 
     try:
         if suggestions_for_update_tracker:
@@ -725,8 +794,9 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 force_apply_suggestions=True,
                 apply_ast_overrides=False,  # <<< MODIFIED/ADDED
             )
+            # --- NEW: More informative message ---
             print(
-                f"Successfully processed dependency addition for tracker {tracker_path}."
+                f"Successfully processed {len(final_target_keys_for_suggestion_list)} dependency addition(s) for tracker {tracker_path}."
             )
         else:
             logger.info(
@@ -738,6 +808,8 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 f"Attempting to update checklist with {len(checklist_updates_pending)} code-doc dependencies."
             )
             all_checklist_ok_add = True
+            successful_checklist_adds = 0
+            # --- MODIFIED to handle new return type from checklist function ---
             for (
                 src_k_c,
                 src_p_c,
@@ -746,19 +818,34 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 dep_t_c,
             ) in checklist_updates_pending:
                 # Pass base key strings to checklist function
-                if not add_code_doc_dependency_to_checklist(src_k_c, tgt_k_c, dep_t_c):
+                result = add_code_doc_dependency_to_checklist(src_k_c, tgt_k_c, dep_t_c)
+                if result is False:  # Explicit check for error
                     all_checklist_ok_add = False
                     logger.error(
                         f"Failed to add {src_k_c} ('{src_p_c}') -> {tgt_k_c} ('{tgt_p_c}') with type '{dep_t_c}' to review checklist."
                     )
-                else:
+                elif result is True:  # Explicit check for new addition
+                    successful_checklist_adds += 1
                     logger.info(
-                        f"Added/Updated dependency {src_k_c} ('{src_p_c}') -> {tgt_k_c} ('{tgt_p_c}') with type '{dep_t_c}' in review checklist."
+                        f"Added dependency {src_k_c} ('{src_p_c}') -> {tgt_k_c} ('{tgt_p_c}') with type '{dep_t_c}' to review checklist."
                     )
+                # If result is None (duplicate), we just log nothing, which is fine.
+
+            # --- NEW: More informative message ---
+            if successful_checklist_adds > 0:
+                print(
+                    f"Successfully added {successful_checklist_adds} new code-doc dependencies to the review checklist."
+                )
             if not all_checklist_ok_add:
                 print(
                     "Warning: Some code-doc dependencies could not be added/updated in the review checklist."
                 )
+
+        # --- NEW: Report rejected targets ---
+        if rejected_targets:
+            print("\nThe following targets were rejected and not processed:")
+            for key, reason in rejected_targets:
+                print(f"  - {key}: {reason}")
         return 0
     except Exception as e_add_dep_proc:
         logger.error(

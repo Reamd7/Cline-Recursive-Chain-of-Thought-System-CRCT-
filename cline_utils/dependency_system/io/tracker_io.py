@@ -1473,7 +1473,7 @@ def update_tracker(
     # --- 1. Type-Specific Logic Block ---
     if tracker_type == "main":
         output_file = main_tracker_data["get_tracker_path"](project_root)
-        filtered_modules_map = main_tracker_data["key_filter"](
+        filtered_modules_map: Dict[str, KeyInfo] = main_tracker_data["key_filter"](
             project_root, path_to_key_info
         )
         relevant_key_infos_for_type = list(filtered_modules_map.values())
@@ -1558,7 +1558,7 @@ def update_tracker(
 
     elif tracker_type == "doc":
         output_file = doc_tracker_data["get_tracker_path"](project_root)
-        filtered_items_map = doc_tracker_data["file_inclusion"](
+        filtered_items_map: Dict[str, KeyInfo] = doc_tracker_data["file_inclusion"](
             project_root, path_to_key_info
         )
         relevant_key_infos_for_type = list(filtered_items_map.values())
@@ -3023,31 +3023,36 @@ def update_tracker(
                         _origins,
                     ) in globally_aggregated_links_with_origins.items()
                 }
-                
+
                 # DOC TRACKER CONSOLIDATION SCOPE
                 if tracker_type == "doc":
-                    logger.info(f"Doc Tracker Consolidation: Scoping relationships to doc roots.")
-                    
+                    logger.info(
+                        f"Doc Tracker Consolidation: Scoping relationships to doc roots."
+                    )
+
                     key_string_to_kis = defaultdict(list)
                     for ki in path_to_key_info.values():
                         key_string_to_kis[ki.key_string].append(ki)
 
-                    def is_path_in_doc_roots(path: str) -> bool:
-                        norm_p = normalize_path(path)
-                        return any(is_subpath(norm_p, dr) or norm_p == dr for dr in abs_doc_roots_set)
 
                     def key_in_doc_root(key_str: str) -> bool:
                         kis = key_string_to_kis.get(key_str)
-                        if not kis: return False
-                        return any(is_path_in_doc_roots(ki.norm_path) for ki in kis)
+                        if not kis:
+                            return False
+                        return any(is_path_in_doc_roots(ki.norm_path, abs_doc_roots_set) for ki in kis)
 
                     scoped_rels = {
                         (src_key, tgt_key): char
-                        for (src_key, tgt_key), char in global_authoritative_rels.items()
+                        for (
+                            src_key,
+                            tgt_key,
+                        ), char in global_authoritative_rels.items()
                         if key_in_doc_root(src_key) and key_in_doc_root(tgt_key)
                     }
-                    
-                    logger.debug(f"Scoped consolidation from {len(global_authoritative_rels)} to {len(scoped_rels)} relationships for doc_tracker.")
+
+                    logger.debug(
+                        f"Scoped consolidation from {len(global_authoritative_rels)} to {len(scoped_rels)} relationships for doc_tracker."
+                    )
                     global_authoritative_rels = scoped_rels
 
                 logger.debug(
@@ -3338,27 +3343,33 @@ def update_tracker(
             logger.info(
                 f"Mini Tracker ({os.path.basename(output_file)}): Skipping foreign key pruning because force_apply_suggestions is True."
             )
-    elif (
-        tracker_type == "doc" and final_key_info_list
-    ):
-        logger.info(f"Doc Tracker ({os.path.basename(output_file)}): Pruning items not in a doc root.")
-        
+    elif tracker_type == "doc" and final_key_info_list:
+        logger.info(
+            f"Doc Tracker ({os.path.basename(output_file)}): Pruning items not in a doc root."
+        )
+
         original_key_info_count = len(final_key_info_list)
-        
+
         def is_path_in_doc_roots(path: str, doc_roots_set: Set[str]) -> bool:
             norm_item_p = normalize_path(path)
-            return any(is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set)
+            return any(
+                is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set
+            )
 
         pruned_key_info_list = [
-            ki for ki in final_key_info_list if is_path_in_doc_roots(ki.norm_path, abs_doc_roots_set)
+            ki
+            for ki in final_key_info_list
+            if is_path_in_doc_roots(ki.norm_path, abs_doc_roots_set)
         ]
 
         if len(pruned_key_info_list) < original_key_info_count:
             num_pruned = original_key_info_count - len(pruned_key_info_list)
-            logger.info(f"Doc Tracker Pruning: Pruned {num_pruned} items that are not in a configured doc root.")
-            
+            logger.info(
+                f"Doc Tracker Pruning: Pruned {num_pruned} items that are not in a configured doc root."
+            )
+
             grid_structure_changed_flag = True
-            
+
             original_final_key_info_list_before_pruning = list(final_key_info_list)
             original_temp_decomp_grid_rows_before_pruning = [
                 list(row) for row in temp_decomp_grid_rows
@@ -3383,24 +3394,51 @@ def update_tracker(
                 for _ in range(new_grid_item_count)
             ]
             for i_rebuild in range(new_grid_item_count):
-                rebuilt_temp_decomp_grid_rows[i_rebuild][
-                    i_rebuild
-                ] = DIAGONAL_CHAR
+                rebuilt_temp_decomp_grid_rows[i_rebuild][i_rebuild] = DIAGONAL_CHAR
 
             pruned_path_to_new_idx_map = {
                 ki.norm_path: i for i, ki in enumerate(final_key_info_list)
             }
 
             for new_r_idx, new_r_ki in enumerate(final_key_info_list):
-                orig_r_idx = next((i for i, ki_orig in enumerate(original_final_key_info_list_before_pruning) if ki_orig.norm_path == new_r_ki.norm_path), None)
-                if orig_r_idx is None: continue
+                orig_r_idx = next(
+                    (
+                        i
+                        for i, ki_orig in enumerate(
+                            original_final_key_info_list_before_pruning
+                        )
+                        if ki_orig.norm_path == new_r_ki.norm_path
+                    ),
+                    None,
+                )
+                if orig_r_idx is None:
+                    continue
                 for new_c_idx, new_c_ki in enumerate(final_key_info_list):
-                    if new_r_idx == new_c_idx: continue
-                    orig_c_idx = next((i for i, ki_orig in enumerate(original_final_key_info_list_before_pruning) if ki_orig.norm_path == new_c_ki.norm_path), None)
-                    if orig_c_idx is None: continue
-                    
-                    if orig_r_idx < len(original_temp_decomp_grid_rows_before_pruning) and orig_c_idx < len(original_temp_decomp_grid_rows_before_pruning[orig_r_idx]):
-                        rebuilt_temp_decomp_grid_rows[new_r_idx][new_c_idx] = original_temp_decomp_grid_rows_before_pruning[orig_r_idx][orig_c_idx]
+                    if new_r_idx == new_c_idx:
+                        continue
+                    orig_c_idx = next(
+                        (
+                            i
+                            for i, ki_orig in enumerate(
+                                original_final_key_info_list_before_pruning
+                            )
+                            if ki_orig.norm_path == new_c_ki.norm_path
+                        ),
+                        None,
+                    )
+                    if orig_c_idx is None:
+                        continue
+
+                    if orig_r_idx < len(
+                        original_temp_decomp_grid_rows_before_pruning
+                    ) and orig_c_idx < len(
+                        original_temp_decomp_grid_rows_before_pruning[orig_r_idx]
+                    ):
+                        rebuilt_temp_decomp_grid_rows[new_r_idx][new_c_idx] = (
+                            original_temp_decomp_grid_rows_before_pruning[orig_r_idx][
+                                orig_c_idx
+                            ]
+                        )
 
             temp_decomp_grid_rows = rebuilt_temp_decomp_grid_rows
             final_path_to_new_idx = pruned_path_to_new_idx_map
