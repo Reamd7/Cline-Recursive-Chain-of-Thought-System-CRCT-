@@ -224,7 +224,7 @@ def get_tracker_path(
             mini_data_config["get_tracker_path"]
         ):  # Check if dedicated function exists
             path_func = mini_data_config["get_tracker_path"]
-            return normalize_path(path_func(norm_module_path))
+            return normalize_path(str(path_func(norm_module_path)))
         else:
             module_name = os.path.basename(norm_module_path)
             if (
@@ -1143,7 +1143,7 @@ def get_mini_tracker_path(module_path: str) -> str:
     if "get_tracker_path" in mini_data_config and callable(
         mini_data_config["get_tracker_path"]
     ):
-        return normalize_path(mini_data_config["get_tracker_path"](norm_module_path))
+        return normalize_path(str(mini_data_config["get_tracker_path"](norm_module_path)))
     else:  # Fallback standard naming convention
         module_name = os.path.basename(norm_module_path)
         raw_path = os.path.join(norm_module_path, f"{module_name}_module.md")
@@ -1442,6 +1442,13 @@ def update_tracker(
         normalize_path(os.path.join(project_root, p))
         for p in config.get_doc_directories()
     }
+
+    # Shared helper used by consolidation and pruning: determines whether a path
+    # is inside any configured documentation root. Declared early so nested
+    # functions (like key_in_doc_root) can safely reference it during consolidation.
+    def is_path_in_doc_roots(path: str, doc_roots_set: Set[str]) -> bool:
+        norm_item_p = normalize_path(path)
+        return any(is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set)
 
     # Mini-tracker import counters/flags
     native_foreign_import_ct, foreign_foreign_import_ct = 0, 0
@@ -3349,12 +3356,6 @@ def update_tracker(
         )
 
         original_key_info_count = len(final_key_info_list)
-
-        def is_path_in_doc_roots(path: str, doc_roots_set: Set[str]) -> bool:
-            norm_item_p = normalize_path(path)
-            return any(
-                is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set
-            )
 
         pruned_key_info_list = [
             ki
