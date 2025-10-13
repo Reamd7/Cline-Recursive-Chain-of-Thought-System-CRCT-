@@ -575,21 +575,27 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     matching_source_infos.sort(key=lambda ki: ki.norm_path)
     resolved_source_ki: Optional[KeyInfo] = None
     if src_user_global_instance_num is not None:
-        if 0 < src_user_global_instance_num <= len(matching_source_infos):
-            resolved_source_ki = matching_source_infos[src_user_global_instance_num - 1]
+        source_key_to_find = f"{src_base_key_str}#{src_user_global_instance_num}"
+        found_ki = next(
+            (ki for ki in matching_source_infos if ki.key_string == source_key_to_find),
+            None,
+        )
+        if found_ki:
+            resolved_source_ki = found_ki
         else:
             print(
-                f"Error: Source key '{source_key_arg_raw}' specifies an invalid global instance number. Max is {len(matching_source_infos)}."
+                f"Error: Source key '{source_key_arg_raw}' specifies an invalid global instance number."
             )
+            print(f"Available instances for '{src_base_key_str}':")
+            for ki in matching_source_infos:
+                print(f"  - {ki.key_string} (Path: {ki.norm_path})")
             return 1
     elif len(matching_source_infos) > 1:
         print(
             f"Error: Source key '{src_base_key_str}' is globally ambiguous. Please specify which instance you mean using '#<num>':"
         )
-        for i, ki in enumerate(matching_source_infos):
-            print(
-                f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})  (Use as '{src_base_key_str}#{i+1}')"
-            )
+        for ki in matching_source_infos:
+            print(f"  - {ki.key_string} (Path: {ki.norm_path})")
         return 1
     else:
         resolved_source_ki = matching_source_infos[0]
@@ -661,14 +667,24 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         matching_target_infos.sort(key=lambda ki: ki.norm_path)
         resolved_target_ki: Optional[KeyInfo] = None
         if tgt_user_global_instance_num is not None:
-            if 0 < tgt_user_global_instance_num <= len(matching_target_infos):
-                resolved_target_ki = matching_target_infos[
-                    tgt_user_global_instance_num - 1
-                ]
+            target_key_to_find = f"{tgt_base_key_str}#{tgt_user_global_instance_num}"
+            found_ki = next(
+                (
+                    ki
+                    for ki in matching_target_infos
+                    if ki.key_string == target_key_to_find
+                ),
+                None,
+            )
+            if found_ki:
+                resolved_target_ki = found_ki
             else:
                 print(
-                    f"Error: Target key '{tgt_key_arg_item_raw}' specifies an invalid global instance number. Max is {len(matching_target_infos)}."
+                    f"Error: Target key '{tgt_key_arg_item_raw}' specifies an invalid global instance number."
                 )
+                print(f"Available instances for '{tgt_base_key_str}':")
+                for ki in matching_target_infos:
+                    print(f"  - {ki.key_string} (Path: {ki.norm_path})")
                 rejected_targets.append(
                     (tgt_key_arg_item_raw, "Invalid global instance number.")
                 )
@@ -677,10 +693,8 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             print(
                 f"Error: Target key '{tgt_base_key_str}' is globally ambiguous. Please specify which instance you mean using '#<num>':"
             )
-            for i, ki in enumerate(matching_target_infos):
-                print(
-                    f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})  (Use as '{tgt_base_key_str}#{i+1}')"
-                )
+            for ki in matching_target_infos:
+                print(f"  - {ki.key_string} (Path: {ki.norm_path})")
             rejected_targets.append((tgt_key_arg_item_raw, "Globally ambiguous key."))
             continue
         else:
@@ -1003,9 +1017,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
             f"Error: Source key '{base_key_to_show}' is globally ambiguous. Please specify which instance you mean using '#<num>':"
         )
         for i, ki in enumerate(matching_source_infos):
-            print(
-                f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})  (Use as '{base_key_to_show}#{i+1}')"
-            )
+            print(f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})")
         return 1
     else:
         target_ki_to_show = matching_source_infos[0]
