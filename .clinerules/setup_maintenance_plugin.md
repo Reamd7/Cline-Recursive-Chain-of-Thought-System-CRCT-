@@ -107,7 +107,10 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
     *   **B. Verify Placeholders/Suggestions for Identified Keys**:
         *   Iterate through the list of keys from Step 2.A.
         *   For each `key_string` (row key):
-            *   **Get Context**: Run `show-dependencies --key <key_string>`. This searches *all* trackers for relationships involving this key. Note the target keys (column keys) associated with 'p', 's', 'S' *in `doc_tracker.md`* specifically.
+            *   **Get Context**: Run `show-placeholders` targeting the current tracker and key. This command specifically lists the 'p', 's', and 'S' relationships for the given key *within this tracker*, providing a targeted list for verification.
+            ```bash
+            python -m cline_utils.dependency_system.dependency_processor show-placeholders --tracker <path_to_doc_tracker.md> --key <key_string>
+            ```
             *   **Plan Reading**: Identify the source file (for `key_string`) and relevant target files (for column keys needing verification). To improve efficiency, plan to read the source file and *multiple* relevant target files together in the next step. Suggest batch reading if files are co-located (e.g., "Suggest reading source file X and target files Y, Z from the same directory. Can you provide folder contents or should I read individually using `read_file`?"). Be mindful of context limits.
             *   **Examine Files**: Use `read_file` to examine the content of the source file and the relevant target files/folders identified.
             *   **Determine Relationship (CRITICAL STEP)**: Based on file contents, determine the **true functional or essential conceptual relationship** between the source (`key_string`) and each target key being verified.
@@ -147,7 +150,10 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
         *   Select the next mini-tracker path from the list. State which one you are processing.
         *   **Repeat Verification Steps**: Follow the same sub-procedure as in Stage 1 (Steps 2.A and 2.B), but substitute the current mini-tracker path for `<path_to_doc_tracker.md>` in all commands (`show-keys`, `add-dependency`).
             *   **Identify Keys**: Use `show-keys --tracker <mini_tracker_path>`. List keys needing checks.
-            *   **Verify Keys**: Iterate through keys needing checks. Use `show-dependencies --key <key_string>` (searches globally for context). Examine source/target files (`read_file`). State reasoning based on functional/conceptual reliance. Use `add-dependency --tracker <mini_tracker_path> --source-key <key_string> --target-key <target_key> --dep-type <char>`.
+            *   **Verify Keys**: Iterate through keys needing checks. Use `show-placeholders` to get a targeted list of unverified dependencies *within this mini-tracker*. Examine source/target files (`read_file`). State reasoning based on functional/conceptual reliance. Use `add-dependency --tracker <mini_tracker_path> --source-key <key_string> --target-key <target_key> --dep-type <char>`.
+            ```bash
+            python -m cline_utils.dependency_system.dependency_processor show-placeholders --tracker <mini_tracker_path> --key <key_string>
+            ```
             *   **Foreign Keys**: Remember, when using `add-dependency` on a mini-tracker, the `--target-key` can be an external (foreign) key if it exists globally (Core Prompt Section VIII). Use this to link internal code to external docs or code in other modules if identified during analysis. State reasoning clearly.
               ```bash
               # Example: Set 'd' from internal code file 1Ba2 to external doc 1Aa6 in agents_module.md
@@ -163,7 +169,10 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
     *   Follow the same verification sub-procedure as in Stage 1 (Steps 2.A, 2.B, 2.C), targeting `<path_to_module_relationship_tracker.md>` (likely `{memory_dir}/module_relationship_tracker.md`).
         *   **Identify Keys**: Use `show-keys --tracker <path_to_module_relationship_tracker.md>`. List keys needing checks. If none, state this and verification is complete.
         *   **Verify Keys**: Iterate through keys needing checks.
-            *   **Context**: Use `show-dependencies --key <key_string>` (searches globally). When determining relationships here (module-to-module), rely heavily on the verified dependencies established *within* the mini-trackers during Stage 2, as well as the overall system architecture (`system_manifest.md`). A module-level dependency often arises because *some file within* module A depends on *some file within* module B. Read key module files/docs (`read_file`) only if mini-tracker context is insufficient.
+            *   **Context**: Use `show-placeholders` to get the list of unverified module-level dependencies. When determining relationships here, rely heavily on the verified dependencies established *within* the mini-trackers during Stage 2, as well as the overall system architecture (`system_manifest.md`). A module-level dependency often arises because *some file within* module A depends on *some file within* module B. Read key module files/docs (`read_file`) only if mini-tracker context is insufficient.
+            ```bash
+            python -m cline_utils.dependency_system.dependency_processor show-placeholders --tracker <path_to_module_relationship_tracker.md> --key <key_string>
+            ```
             *   **Determine Relationship & State Reasoning**: Base decision on aggregated dependencies from mini-trackers and high-level design intent.
             *   **Correct/Confirm**: Use `add-dependency --tracker <path_to_module_relationship_tracker.md>` with appropriate arguments.
         *   **Final Check**: Run `show-keys --tracker <path_to_module_relationship_tracker.md>` again to confirm no checks needed remain.
@@ -219,8 +228,8 @@ graph TD
     subgraph Verify_doc_tracker [Stage 1: doc_tracker.md]
         C1[Use show-keys --tracker doc_tracker.md] --> C2{Checks Needed?};
         C2 -- Yes --> C3[Identify Key(s)];
-        C3 --> C4[For Each Key needing check:] ;
-        C4 --> C5(Run show-dependencies --key [key]);
+        C3 --> C4[For Each Key needing check:];
+        C4 --> C5(Run show-placeholders --tracker doc_tracker.md --key [key]);
         C5 --> C6(Plan Reading / Suggest Batch);
         C6 --> C7(Read Source + Target Files);
         C7 --> C8(Determine Relationship & State Reasoning);
@@ -244,7 +253,7 @@ graph TD
         E7 --> E8{Checks Needed?};
         E8 -- Yes --> E9[Identify Key(s)];
         E9 --> E10[For Each Key needing check:];
-        E10 --> E11(Run show-dependencies --key [key]);
+        E10 --> E11(Run show-placeholders --tracker [mini_tracker] --key [key]);
         E11 --> E12(Plan Reading / Suggest Batch);
         E12 --> E13(Read Source + Target Files);
         E13 --> E14(Determine Relationship & State Reasoning - Consider Foreign Keys/External);
@@ -266,7 +275,7 @@ graph TD
         G1[Use show-keys --tracker module_relationship_tracker.md] --> G2{Checks Needed?};
         G2 -- Yes --> G3[Identify Key(s)];
         G3 --> G4[For Each Key needing check:];
-        G4 --> G5(Run show-dependencies --key [key]);
+        G4 --> G5(Run show-placeholders --tracker module_relationship_tracker.md --key [key]);
         G5 --> G6(Plan Reading / Use Mini-Tracker Context / Read Key Module Files);
         G6 --> G7(Determine Relationship & State Reasoning - Module Level);
         G7 --> G8(Use add-dependency --tracker module_relationship_tracker.md);

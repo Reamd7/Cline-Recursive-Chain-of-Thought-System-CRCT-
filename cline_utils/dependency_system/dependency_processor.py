@@ -1330,6 +1330,103 @@ def handle_show_keys(args: argparse.Namespace) -> int:
         return 1
 
 
+def handle_show_placeholders(args: argparse.Namespace) -> int:
+    """
+    Handle the show-placeholders command.
+    Finds and displays all unverified dependencies ('p', 's', 'S').
+    """
+    tracker_path = normalize_path(args.tracker)
+    focus_key = args.key
+    dep_char_filter = args.dep_char
+
+    if not os.path.exists(tracker_path):
+        print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr)
+        return 1
+
+    chars_to_check: Tuple[str, ...]
+    if dep_char_filter:
+        chars_to_check = (dep_char_filter,)
+    else:
+        chars_to_check = ("p", "s", "S")
+
+    try:
+        with open(tracker_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        key_def_pairs = read_key_definitions_from_lines(lines)
+        _grid_headers, grid_rows_data = read_grid_from_lines(lines)
+
+        if not key_def_pairs or not grid_rows_data:
+            print(f"No valid key definitions or grid data found in {tracker_path}.")
+            return 0
+
+        unverified_deps: Dict[str, Dict[str, List[str]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        all_row_labels = {row_label for row_label, _ in grid_rows_data}
+
+        if focus_key and focus_key not in all_row_labels:
+            print(f"Error: Key '{focus_key}' not found as a row in {tracker_path}.")
+            return 1
+
+        for row_idx, (row_label, compressed_row) in enumerate(grid_rows_data):
+            if focus_key and row_label != focus_key:
+                continue
+
+            try:
+                decompressed = decompress(compressed_row)
+                if len(decompressed) != len(key_def_pairs):
+                    logger.warning(
+                        f"Row for key '{row_label}' has mismatched length. Expected {len(key_def_pairs)}, got {len(decompressed)}. Skipping row."
+                    )
+                    continue
+
+                for col_idx, char in enumerate(decompressed):
+                    if char in chars_to_check:
+                        if col_idx < len(key_def_pairs):
+                            target_label = key_def_pairs[col_idx][0]
+                            unverified_deps[row_label][char].append(target_label)
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing row for key '{row_label}': {e}", exc_info=True
+                )
+                continue
+
+        if not unverified_deps:
+            print(
+                f"No unverified dependencies {chars_to_check} found in {os.path.basename(tracker_path)}."
+            )
+            return 0
+
+        print(
+            f"Unverified dependencies {chars_to_check} in {os.path.basename(tracker_path)}:"
+        )
+        sorted_source_keys = sorted(
+            unverified_deps.keys(), key=get_sortable_parts_for_key
+        )
+        for source_label in sorted_source_keys:
+            print(f"\n--- Key: {source_label} ---")
+            char_map = unverified_deps[source_label]
+            for char_type in sorted(char_map.keys()):
+                target_labels = sorted(
+                    char_map[char_type], key=get_sortable_parts_for_key
+                )
+                print(f"  {char_type}: {' '.join(target_labels)}")
+
+        return 0
+
+    except IOError as e:
+        print(f"Error reading tracker file {tracker_path}: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(
+            f"An unexpected error occurred while processing {tracker_path}: {e}",
+            file=sys.stderr,
+        )
+        return 1
+
+
 def handle_visualize_dependencies(args: argparse.Namespace) -> int:
     """Handles the visualize-dependencies command by calling the core generation function."""
     focus_keys_list_cli: List[str] = args.key if args.key is not None else []
@@ -1664,6 +1761,26 @@ def main():
         "--tracker", required=True, help="Path to the tracker file (.md)"
     )
     show_keys_parser.set_defaults(func=handle_show_keys)
+
+    # --- Show Placeholders Command (ENHANCED) ---
+    show_placeholders_parser = subparsers.add_parser(
+        "show-placeholders",
+        help="Show unverified dependencies ('p', 's', 'S') in a tracker",
+    )
+    show_placeholders_parser.add_argument(
+        "--tracker", required=True, help="Path to the tracker file (.md)"
+    )
+    show_placeholders_parser.add_argument(
+        "--key",
+        required=False,
+        help="Optional: Show unverified dependencies only for this specific source key label.",
+    )
+    show_placeholders_parser.add_argument(
+        "--dep-char",
+        required=False,
+        help="Optional: Show only a specific dependency character (e.g., 'p', 's'). Shows p, s, S by default.",
+    )
+    show_placeholders_parser.set_defaults(func=handle_show_placeholders)
 
     visualize_parser = subparsers.add_parser(
         "visualize-dependencies", help="Generate a visualization of dependencies"

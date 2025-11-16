@@ -4,7 +4,7 @@ This outlines the fundamental principles, required files, workflow structure, an
 
 **Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution, Cleanup/Consolidation), controlled **exclusively** by the `next_phase` setting in `.clinerules`. "Plan Mode" or any other "Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `next_phase`.
 
-The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
+The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what commands like `show-dependencies` and `show-placeholders` are for.
 *Do not rely on what you assume are 'p' relations in the raw grid output. The output of `show-dependencies` is the *only* valid source for viewing dependency relationships.*
 **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 *   If "3Ba2" is globally unique, this works directly.
@@ -112,7 +112,7 @@ These files form the project foundation. ***At initialization, you MUST read the
 - `userProfile.md`
 - `progress.md`
 
-**IMPORTANT: Do NOT attempt to read the content of `module_relationship_tracker.md`, `doc_tracker.md` directly.** Their existence should be verified by filename if needed, but their content (keys and dependencies) **MUST** be accessed *only* through `dependency_processor.py` commands, primarily `show-keys` and `show-dependencies`. This conserves context tokens and ensures correct parsing.
+**IMPORTANT: Do NOT attempt to read the content of `module_relationship_tracker.md`, `doc_tracker.md` directly.** Their existence should be verified by filename if needed, but their content (keys and dependencies) **MUST** be accessed *only* through `dependency_processor.py` commands, primarily `show-keys`, `show-dependencies`, and the specialized `show-placeholders` command. This conserves context tokens and ensures correct parsing.
 
 If a required file (from the list below) is missing, handle its creation as specified in the **Set-up/Maintenance phase**. The table below provides an overview:
 
@@ -327,7 +327,7 @@ The MUP must be followed immediately after any state-changing action:
 
 Located in `cline_utils/`. **All commands are executed via `python -m cline_utils.dependency_system.dependency_processor <command> [args...]`.** Most commands return a status message upon completion.
 
-**IMPORTANT: To ensure data consistency, conserve context window tokens, and leverage built-in parsing logic, ALWAYS use the `show-keys` and `show-dependencies` commands to retrieve key definitions and dependency information from tracker files (`*_tracker.md`, `*_module.md`). Avoid using `read_file` on tracker files for this purpose.** Direct reading can lead to parsing errors and consumes excessive context.
+**IMPORTANT: To ensure data consistency, conserve context window tokens, and leverage built-in parsing logic, ALWAYS use the `show-keys`, `show-dependencies`, and `show-placeholders` commands to retrieve key definitions and dependency information from tracker files (`*_tracker.md`, `*_module.md`). Avoid using `read_file` on tracker files for this purpose.** Direct reading can lead to parsing errors and consumes excessive context.
 
 **Core Commands for CRCT Workflow:**
 
@@ -351,7 +351,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
     *   **Purpose**: Manually sets or updates the dependency relationship (`--dep-type`) between *one* **source key** (`--source-key`, the row) and *one or more* **target keys** (`--target-key`, the columns) *within the specified `<tracker_file>`*. Use this during Set-up/Maintenance (verification) or Execution (reflecting new code links) to correct suggestions or mark verified relationships ('<', '>', 'x', 'd', 'n').
-    *   **Workflow Note**: During verification (Set-up/Maintenance), the key analyzed with `show-dependencies` **always serves as the `--source-key`**. The related column keys identified from the `show-dependencies` output are used as the `--target-key`(s).
+    *   **Workflow Note**: During verification (Set-up/Maintenance), the key analyzed with `show-placeholders` **always serves as the `--source-key`**. The related column keys identified from the `show-placeholders` output are used as the `--target-key`(s).
     *   **IMPORTANT**: Before executing this command during the verification process (Set-up/Maintenance), you **MUST** state your reasoning for choosing the specific `--dep-type` based on your analysis of functional reliance between the source and target files/concepts.
     **Example**:
     ```python
@@ -381,7 +381,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *   **Errors**: "Tracker/Key Not Found". Verify path and that the key exists *in that specific tracker*.
 
 5.  **`show-keys --tracker <tracker_file_path>`**:
-    *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. **Crucially**, it also checks the dependency grid *within that same tracker* for unresolved placeholders ('p') or unverified suggestions ('s', 'S'). If found in a key's row, appends `(checks needed: p, s, S)` specifying which characters require attention for that key *in this tracker*. This is the **primary method** during Set-up/Maintenance for identifying keys needing verification via `show-dependencies`.
+    *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. **Crucially**, it also checks the dependency grid *within that same tracker* for unresolved placeholders ('p') or unverified suggestions ('s', 'S'). If found in a key's row, appends `(checks needed: p, s, S)` specifying which characters require attention. This is the **primary method** during Set-up/Maintenance for identifying keys that have unverified relationships. The specific relationships can then be viewed with `show-placeholders`.
         - If a base key string is used by multiple different items globally, this command will display the specific global instance (e.g., `2A1#1: path/to/item_A.md`) for definitions in this tracker that refer to such items.
     *   **Example**:
     ```python
@@ -397,21 +397,40 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
         --- End of Key Definitions ---
         ```
 
+6.  **`show-placeholders --tracker <tracker_file> [--key <key>] [--dep-char <char>]`**:
+    *   **Purpose**: Provides a targeted view of unverified dependencies ('p', 's', 'S') for keys within a *single specified tracker*. This is the **primary tool** used during the Set-up/Maintenance verification workflow to get a clear list of what needs to be investigated for a given key.
+    *   **Arguments**:
+        *   `--tracker`: The tracker file to inspect.
+        *   `--key` (optional): Focuses the output on a single source key (row).
+        *   `--dep-char` (optional): Filters the output to show only a specific character (e.g., 'p'). By default, it shows 'p', 's', and 'S'.
+    *   **Example**:
+    ```python
+     `python -m cline_utils.dependency_system.dependency_processor show-placeholders --tracker cline_docs/doc_tracker.md --key 1A2`
+    ```
+    *   **Output Example**:
+        ```
+        Unverified dependencies ('p', 's', 'S') in doc_tracker.md:
+
+        --- Key: 1A2 ---
+          p: 2B1#2 3C4
+          s: 4D1
+        ```
+
 **Configuration & Utility Commands:**
 
-6.  **`update-config <key_path> <value>`**:
+7.  **`update-config <key_path> <value>`**:
     *   **Purpose**: Updates a specific setting in the `.clinerules.config.json` file (which stores detailed configuration for the dependency system). Primarily used during setup or for tuning.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor update-config thresholds.code_similarity 0.8`
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor update-config models.doc_model_name all-MiniLM-L6-v2`
     *   **Keys**: `paths.doc_dir`, `paths.code_root_dirs`, `models.doc_model_name`, `models.code_model_name`, `thresholds.doc_similarity`, `thresholds.code_similarity`, `compute.embedding_device`, etc.
 
-7.  **`reset-config`**:
+8.  **`reset-config`**:
     *   **Purpose**: Resets all settings in `.clinerules.config.json` to their default values. Use with caution.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor reset-config`
 
-8.  **`merge-trackers <primary_tracker> <secondary_tracker> [--output <output_path>]`**: Merges two tracker files. (Advanced use).
-9.  **`export-tracker <tracker_file> [--format <json|csv|dot>] [--output <output_path>]`**: Exports tracker data. (Useful for visualization/external analysis).
-10. **`clear-caches`**: Clears internal caches used by the dependency system (embeddings, analysis results). Useful for debugging or forcing re-computation.
+9.  **`merge-trackers <primary_tracker> <secondary_tracker> [--output <output_path>]`**: Merges two tracker files. (Advanced use).
+10. **`export-tracker <tracker_file> [--format <json|csv|dot>] [--output <output_path>]`**: Exports tracker data. (Useful for visualization/external analysis).
+11. **`clear-caches`**: Clears internal caches used by the dependency system (embeddings, analysis results). Useful for debugging or forcing re-computation.
 
 ## IX. Plugin Usage Guidance
 
