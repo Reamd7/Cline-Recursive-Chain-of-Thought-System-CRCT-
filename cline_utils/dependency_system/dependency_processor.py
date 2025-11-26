@@ -1349,6 +1349,13 @@ def handle_show_placeholders(args: argparse.Namespace) -> int:
     else:
         chars_to_check = ("p", "s", "S")
 
+    # --- Load Global Map for Path Resolution ---
+    global_map = load_global_key_map()
+    key_to_path_map = {}
+    if global_map:
+        for k_info in global_map.values():
+            key_to_path_map[k_info.key_string] = k_info.norm_path
+
     try:
         with open(tracker_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -1406,13 +1413,17 @@ def handle_show_placeholders(args: argparse.Namespace) -> int:
             unverified_deps.keys(), key=get_sortable_parts_for_key
         )
         for source_label in sorted_source_keys:
-            print(f"\n--- Key: {source_label} ---")
+            source_path = key_to_path_map.get(source_label, "Path not found")
+            print(f"\n--- Key: {source_label} (Path: {source_path}) ---")
             char_map = unverified_deps[source_label]
             for char_type in sorted(char_map.keys()):
                 target_labels = sorted(
                     char_map[char_type], key=get_sortable_parts_for_key
                 )
-                print(f"  {char_type}: {' '.join(target_labels)}")
+                print(f"  {char_type}:")
+                for tgt in target_labels:
+                    tgt_path = key_to_path_map.get(tgt, "Path not found")
+                    print(f"    - {tgt} (Path: {tgt_path})")
 
         return 0
 
