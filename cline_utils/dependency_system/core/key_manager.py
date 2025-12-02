@@ -769,10 +769,19 @@ def generate_keys(
     return path_to_key_info, unique_new_keys
 
 
+from cline_utils.dependency_system.utils.cache_manager import cached
+
+
+@cached(
+    "global_key_map_load",
+    key_func=lambda: f"global_key_map:{os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), GLOBAL_KEY_MAP_FILENAME)) if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), GLOBAL_KEY_MAP_FILENAME)) else 0}",
+)
 def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
     """
     Loads the persisted global path_to_key_info map from the JSON file
     located alongside key_manager.py.
+
+    Cached based on file modification time.
 
     Returns:
         The loaded dictionary mapping normalized paths to KeyInfo objects,
@@ -851,7 +860,7 @@ def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
             except TypeError as te:
                 logger.error(f"Error converting OLD KeyInfo data for '{path}': {te}")
                 continue
-        logger.info(
+        logger.debug(
             f"Loaded previous global key map ({len(path_to_key_info)} entries) from: {map_path}"
         )
         return path_to_key_info

@@ -1,6 +1,7 @@
 # utils/tracker_utils.py
 
 import glob
+import hashlib
 import logging
 import os
 import re
@@ -350,20 +351,31 @@ def find_all_tracker_paths(config: ConfigManager, project_root: str) -> Set[str]
                 logger.error(
                     f"Error during glob search for mini trackers under '{code_root_abs}': {e}"
                 )
-    logger.info(f"Found {len(all_tracker_paths)} total tracker files.")
+    logger.debug(f"Found {len(all_tracker_paths)} total tracker files.")
     return all_tracker_paths
+
+
+def get_global_map_cache_key_part(global_map: Dict[str, Any]) -> str:
+    """Creates a stable hashable key part from a dictionary."""
+    # Hashing sorted keys is stable and avoids hashing unhashable values.
+    # This assumes that the set of paths is the most important changing factor.
+    if not global_map:
+        return "empty"
+    return hashlib.sha256("".join(sorted(global_map.keys())).encode()).hexdigest()
 
 
 # --- MODIFIED AGGREGATION FUNCTION (Uses KEY#global_instance) ---
 @cached(
     "aggregation_v2_gi",
-    key_func=lambda paths, pmi, cgptki: f"agg_v2_gi:{':'.join(sorted(list(paths)))}:{hash(tuple(sorted(pmi.items())))}:{hash(tuple(sorted(cgptki.items())))}",
+    # MODIFIED key_func - show_progress doesn't affect cache, so it's accepted but not included in key
+    key_func=lambda paths, pmi, cgptki, show_progress=True: f"agg_v2_gi:{':'.join(sorted(list(paths)))}:{hash(tuple(sorted(pmi.items())))}:{get_global_map_cache_key_part(cgptki)}",
     ttl=300,
 )
 def aggregate_all_dependencies(
     tracker_paths: Set[str],
     path_migration_info: PathMigrationInfo,
     current_global_path_to_key_info: Dict[str, KeyInfo],  # NEW PARAMETER
+    show_progress: bool = True,
 ) -> Dict[
     Tuple[str, str], Tuple[str, Set[str]]
 ]:  # Output keys are Tuple[src_KEY#GI, tgt_KEY#GI]
@@ -377,7 +389,7 @@ def aggregate_all_dependencies(
     config = ConfigManager()
     get_priority_from_char = config.get_char_priority
 
-    logger.info(
+    logger.debug(
         f"Aggregating dependencies (outputting KEY#global_instance) from {len(tracker_paths)} trackers..."
     )
 
@@ -532,7 +544,7 @@ def aggregate_all_dependencies(
 
     # Run per-tracker aggregation in parallel
     tracker_list = list(tracker_paths)
-    processor = BatchProcessor(show_progress=True)
+    processor = BatchProcessor(show_progress=show_progress, phase_name="Aggregating Dependencies")
     per_tracker_results = processor.process_items(
         tracker_list, _aggregate_single_tracker
     )
@@ -578,7 +590,7 @@ def aggregate_all_dependencies(
                 else:
                     aggregated_links[link] = (str(current_char), set(origins))
 
-    logger.info(
+    logger.debug(
         f"Aggregation complete. Found {len(aggregated_links)} unique KEY#global_instance directed links."
     )
     return aggregated_links

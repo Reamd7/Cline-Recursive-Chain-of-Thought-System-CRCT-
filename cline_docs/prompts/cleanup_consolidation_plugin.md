@@ -49,6 +49,9 @@
 
 **Goal**: Synthesize key information, decisions, and learnings from the recent execution cycle into the core project documentation, and reorganize the changelog by component/module.
 
+<<<***CRITICAL WARNING***>>>
+*You **must** verify the base file's state by manually reading it to determine completion status. For code files read the actual code. For documentation, read the associated documents.*
+
 **Procedure:**
 
 1.  **Review and Verify All Relevant Project Documentation and Task States (CRITICAL)**:

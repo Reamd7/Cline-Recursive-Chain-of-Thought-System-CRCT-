@@ -9,6 +9,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 from collections import defaultdict
 from logging import LogRecord
@@ -176,6 +177,74 @@ def command_handler_analyze_project(args: argparse.Namespace) -> int:
             )
             os.chdir(abs_project_root)
             _ = ConfigManager().config
+
+        # Now that we are in the correct directory, get the config manager and run validation
+        config_manager_instance = ConfigManager()
+
+        # Clear validation cache if --force-validate flag is set
+        if getattr(args, "force_validate", False):
+            try:
+                from .utils.resource_validator import _get_cache_path
+
+                cache_path = _get_cache_path()
+                if os.path.exists(cache_path):
+                    os.remove(cache_path)
+                    logger.info("Cleared validation cache (--force-validate)")
+            except Exception as e:
+                logger.warning(f"Failed to clear validation cache: {e}")
+
+        config_manager_instance.perform_resource_validation_and_adjustments()
+
+        # --- Run Runtime Inspector ---
+        try:
+            # Construct path to runtime_inspector.py relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            runtime_inspector_path = os.path.join(
+                current_dir, "analysis", "runtime_inspector.py"
+            )
+
+            if os.path.exists(runtime_inspector_path):
+                logger.info(f"Running runtime inspector: {runtime_inspector_path}")
+                # Run as a subprocess to avoid namespace pollution and handle crashes safely
+                env = os.environ.copy()
+                # Ensure PYTHONPATH includes the project root so cline_utils can be imported
+                # We need to include the original CWD where the package is installed
+                paths_to_add = [os.getcwd()]
+                if original_cwd and normalize_path(original_cwd) != normalize_path(
+                    os.getcwd()
+                ):
+                    paths_to_add.append(original_cwd)
+
+                path_str = os.pathsep.join(paths_to_add)
+
+                if "PYTHONPATH" in env:
+                    env["PYTHONPATH"] = f"{path_str}{os.pathsep}{env['PYTHONPATH']}"
+                else:
+                    env["PYTHONPATH"] = path_str
+
+                process = subprocess.run(
+                    [sys.executable, runtime_inspector_path, abs_project_root],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=env,
+                )
+
+                if process.returncode == 0:
+                    logger.info("Runtime inspection completed successfully.")
+                    logger.debug(f"Runtime inspector output: {process.stdout}")
+                else:
+                    logger.warning(
+                        f"Runtime inspector failed with return code {process.returncode}"
+                    )
+                    logger.warning(f"Runtime inspector stderr: {process.stderr}")
+            else:
+                logger.warning(
+                    f"Runtime inspector script not found at {runtime_inspector_path}"
+                )
+        except Exception as e:
+            logger.error(f"Error running runtime inspector: {e}")
+
         logger.debug(
             f"Analyzing project: {abs_project_root}, force_analysis={args.force_analysis}, force_embeddings={args.force_embeddings}"
         )
@@ -813,12 +882,12 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 f"Successfully processed {len(final_target_keys_for_suggestion_list)} dependency addition(s) for tracker {tracker_path}."
             )
         else:
-            logger.info(
+            logger.debug(
                 f"No direct tracker updates to apply for {tracker_path} based on CLI input (possibly all targets skipped or invalid)."
             )
 
         if checklist_updates_pending:
-            logger.info(
+            logger.debug(
                 f"Attempting to update checklist with {len(checklist_updates_pending)} code-doc dependencies."
             )
             all_checklist_ok_add = True
@@ -1516,7 +1585,7 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
             "Info: No relevant data found to visualize based on focus keys and filters."
         )
     else:
-        logger.info("Mermaid code generated successfully.")
+        logger.debug("Mermaid code generated successfully.")
 
     output_path_cli = output_path_arg_cli
     if not output_path_cli:
@@ -1561,7 +1630,7 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
         output_path_cli = normalize_path(
             os.path.join(project_root_cli, default_output_dir_rel, default_filename)
         )
-        logger.info(f"No output path specified, using default: {output_path_cli}")
+        logger.debug(f"No output path specified, using default: {output_path_cli}")
 
     elif not os.path.isabs(output_path_cli):
         output_path_cli = normalize_path(
@@ -1639,6 +1708,11 @@ def main():
         "--force-analysis",
         action="store_true",
         help="Force re-analysis and bypass cache",
+    )
+    analyze_project_parser.add_argument(
+        "--force-validate",
+        action="store_true",
+        help="Force fresh resource validation, bypassing cache",
     )
     analyze_project_parser.set_defaults(func=command_handler_analyze_project)
 

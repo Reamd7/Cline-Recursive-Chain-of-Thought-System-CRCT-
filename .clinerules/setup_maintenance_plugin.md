@@ -70,6 +70,8 @@
 
 ## III. Analyzing and Verifying Tracker Dependencies (Ordered Workflow)
 
+**DO NOT ASSUME A DEPENDENCY BEFORE THE RELATED FILES HAVE BEEN READ!!**
+
 **Objective**: Ensure trackers accurately reflect project dependencies by systematically resolving placeholders ('p') and verifying suggestions ('s', 'S'), followed by an explicit code-to-documentation cross-referencing step. **This process MUST follow a specific order:**
 1.  `doc_tracker.md` (Placeholder/Suggestion Resolution)
 2.  All Mini-Trackers (`*_module.md`) (Placeholder/Suggestion Resolution)
@@ -84,6 +86,8 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
 *   Run `analyze-project` *before* starting this verification process if significant code/doc changes have occurred since the last run, or upon entering this phase (as done in Section II).
 
 ***CRITICAL EMPHASIS***: *It is critical that the documentation is **Exhaustively** cross-referenced against the code. The code cannot be completed properly if the docs that define it are not listed as a dependency. The following verification stages, especially Stage 4, are designed to achieve this.*
+
+**This phase isn't about efficiency, it's about *accuracy*. This is a foundational job. If the accuracy in this phase is low, the entire project will suffer.**
 
 **Procedure:**
 

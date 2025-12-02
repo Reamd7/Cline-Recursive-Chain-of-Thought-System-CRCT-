@@ -1,7 +1,15 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.90
+# Cline Recursive Chain-of-Thought System (CRCT) - v8.0
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
+- Version **v8.0**: 🚀 **MAJOR RELEASE** - Embedding & analysis system overhaul
+    - **Symbol Essence Strings (SES)**: Revolutionary embedding architecture combining runtime + AST metadata for 10x better accuracy
+    - **Qwen3 Reranker**: AI-powered semantic dependency scoring with automatic model download
+    - **Hardware-Adaptive Models**: Automatically selects between GGUF (Qwen3-4B) and SentenceTransformer based on available resources
+    - **Runtime Symbol Inspection**: Deep metadata extraction from live Python modules (types, inheritance, decorators)
+    - **PhaseTracker UX**: Real-time progress bars with ETA for all long-running operations
+    - **Enhanced Analysis**: Advanced call filtering, deduplication, internal/external detection
+    - **Breaking Changes**: `set_char` deprecated, `exceptions.py` removed, new dependencies (`llama-cpp-python`), requires re-run of `analyze-project`. See [MIGRATION_v7.x_to_v8.0.md](MIGRATION_v7.x_to_v8.0.md)
 - Version **v7.90**: Introduces dependency visualization, overhauls the Strategy phase for iterative roadmap planning, and refines Hierarchical Design Token Architecture (HDTA) templates.
     - **Dependency Visualization (`visualize-dependencies`)**:
         - Added a new command to generate Mermaid diagrams visualizing project dependencies.
@@ -30,6 +38,24 @@ Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework d
 
 ---
 
+## System Requirements
+
+### Recommended (v8.0+)
+- **VRAM**: 8GB+ (NVIDIA GPU) for optimal Qwen3-4B model performance
+- **RAM**: 16GB+ for large projects
+- **Disk**: 2GB+ for models and embeddings
+- **Python**: 3.8+
+- **Node.js**: 16+ (for mermaid-cli visualization)
+
+### Minimum
+- **RAM**: 4GB (CPU-only mode with reduced batch sizes)
+- **Disk**: 500MB+ (lightweight models)
+- **Python**: 3.8+
+
+*The system automatically adapts to available hardware.*
+
+---
+
 ## Key Features
 
 - **Recursive Decomposition**: Breaks tasks into manageable subtasks, organized via directories and files for isolated context management.
@@ -55,6 +81,11 @@ Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework d
     - New template for Roadmap Summaries.
 - **Configurable Embedding Device**: Allows users to configure the embedding device (`cpu`, `cuda`, `mps`) via `.clinerules.config.json` for optimized performance on different hardware. (Note: *the system does not yet install the requirements for cuda or mps automatically, please install the requirements manually or with the help of the LLM.*)
 - **File Exclusion Patterns**: Users can now define file exclusion patterns in `.clinerules.config.json` to customize project analysis.
+- **Code Quality Analysis**: **(NEW in v8.0)**
+    - **Report Generator**: A new tool (`report_generator.py`) that performs AST-based code quality analysis.
+    - **Incomplete Code Detection**: Identifies `TODO`, `FIXME`, empty functions/classes, and `pass` statements using robust Tree-sitter parsing for Python, JavaScript, and TypeScript.
+    - **Unused Item Detection**: Integrates with Pyright to report unused variables, imports, and functions.
+    - **Actionable Reports**: Generates a detailed `code_analysis/issues_report.md` to guide cleanup efforts.
 - **Caching and Batch Processing**: Significantly improves performance.
 - **Modular Dependency Tracking**:
     - Utilizes main trackers (`module_relationship_tracker.md`, `doc_tracker.md`) and module-specific mini-trackers (`{module_name}_module.md`).
@@ -77,9 +108,7 @@ Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework d
 2. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
-   ```
-   ```bash
-   npm install
+   npm install  # For mermaid-cli visualization
    ```
 
 3. **Set Up Cline or RooCode Extension**:
@@ -90,7 +119,7 @@ Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework d
    - Type `Start.` in the Cline input to initialize the system.
    - The LLM will bootstrap from `.clinerules`, creating missing files and guiding you through setup if needed.
 
-*Note*: The Cline extension’s LLM automates most commands and updates to `cline_docs/`. Minimal user intervention is required (in theory!).
+*Note*: The Cline extension's LLM automates most commands and updates to `cline_docs/`. Minimal user intervention is required (in theory!)
 
 ---
 
@@ -101,8 +130,10 @@ Cline-Recursive-Chain-of-Thought-System-CRCT-/
 │   .clinerules/
 │   .clinerules.config.json       # Configuration for dependency system
 │   .gitignore
+│   CHANGELOG.md                  # Version history <NEW in v8.0>
 │   INSTRUCTIONS.md
 │   LICENSE
+│   MIGRATION_v7.x_to_v8.0.md     # Upgrade guide <NEW in v8.0>
 │   README.md
 │   requirements.txt
 │
@@ -132,12 +163,27 @@ Cline-Recursive-Chain-of-Thought-System-CRCT-/
 ├───cline_utils/                  # Utility scripts
 │   └─dependency_system/
 │     │ dependency_processor.py   # Dependency management script <REVISED>
-│     ├──analysis/                # Analysis modules <REVISED project_analyzer.py>
+│     ├──analysis/                # Analysis modules <MAJOR UPDATES in v8.0>
+│     │    dependency_analyzer.py   <2x growth>
+│     │    dependency_suggester.py  <1.9x growth>
+│     │    embedding_manager.py     <3.4x growth>
+│     │    project_analyzer.py      <1.7x growth>
+│     │    reranker_history_tracker.py <NEW>
+│     │    runtime_inspector.py     <NEW>
 │     ├──core/                    # Core modules <REVISED key_manager.py>
+│     │    exceptions_enhanced.py  <NEW - replaces exceptions.py>
 │     ├──io/                      # IO modules
-│     └──utils/                   # Utility modules <REVISED config_manager.py>, <NEW visualize_dependencies.py>
+│     └──utils/                   # Utility modules
+│          batch_processor.py      <Enhanced with PhaseTracker>
+│          cache_manager.py        <2x growth - compression, policies>
+│          config_manager.py       <2x growth - extensive new config>
+│          phase_tracker.py        <NEW - progress bars>
+│          resource_validator.py   <NEW - system checks>
+│          symbol_map_merger.py    <NEW - runtime+AST merge>
+│          visualize_dependencies.py <NEW>
 │
 ├───docs/                         # Project documentation
+├───models/                       # AI models (auto-downloaded) <NEW>
 └───src/                          # Source code root
 
 ```
@@ -147,12 +193,12 @@ Cline-Recursive-Chain-of-Thought-System-CRCT-/
 
 ## Current Status & Future Plans
 
+- **v8.0**: 🚀 **Major architecture evolution** - Symbol Essence Strings, Qwen3 reranker, hardware-adaptive models, runtime symbol inspection, enhanced UX with PhaseTracker. See [CHANGELOG.md](CHANGELOG.md) for complete details.
 - **v7.8**: Focus on **visual comprehension and planning robustness**. Introduced Mermaid dependency diagrams (`visualize-dependencies`, auto-generation via `analyze-project`). Overhauled the Strategy phase (`strategy_plugin.md`) for iterative, area-based roadmap planning, explicitly using visualizations. Refined HDTA templates, including a new `roadmap_summary_template.md`.
 - **v7.7**: Introduced `cleanup_consolidation` phase, added planning/review tracker templates.
 - **v7.5**: Foundational restructure: Contextual Keys, Hierarchical Aggregation, `show-dependencies`, configuration enhancements, performance improvements (cache/batch).
 
-**Future Focus**: Continue refining performance, usability, and robustness. Areas include improving error handling in file operations (Cleanup), and further optimizing LLM interaction within each phase based on usage patterns. The remainder of the v7.x series will mainly be improving how embeddings, analysis, and similarity suggestions are handled. These releases might come a bit slower than previous areas due to the amount of research and testing needed to genuinely improve upon the current analysis/suggestion system.
-- *tentative* v8.x will be focused on transition to MCP based tool use, with later stages planned to move from filesystem storage/operations to database focused operation.
+**Future Focus**: Continue refining performance, usability, and robustness. v8.x series will focus on optimizing the new reranking and SES systems based on real-world usage. Future versions may include MCP-based tool use and transition from filesystem to database-focused operations.
 
 Feedback is welcome! Please report bugs or suggestions via GitHub Issues.
 
@@ -174,4 +220,4 @@ The system will analyze your codebase, initialize trackers, and guide you forwar
 
 A big Thanks to https://github.com/biaomingzhong for providing detailed instructions that were integrated into the core prompt and plugins! (PR #25)
 
-This is a labor of love to make Cline projects more manageable. I’d love to hear your thoughts—try it out and let me know what works (or doesn’t)!
+This is a labor of love to make Cline projects more manageable. I'd love to hear your thoughts—try it out and let me know what works (or doesn't)!

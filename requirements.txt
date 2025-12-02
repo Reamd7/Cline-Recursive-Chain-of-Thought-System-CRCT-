@@ -1,3 +1,5 @@
+PyYAML
+psycopg[binary]
 tree-sitter
 tree-sitter-css
 tree-sitter-html
@@ -7,8 +9,19 @@ tree-sitter-typescript
 accelerate
 transformers
 torch
-# For CUDA GPU support
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129
 numpy
 sentence-transformers
 jsonc-parser
+psutil
+llama-cpp-python
+pytest
+huggingface_hub
+bitsandbytes
+# For CUDA GPU support
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+# pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu130
+# if llama-cpp-python is not offloading to GPU you may need to build from source in VS 2022 Developer Command Prompt:
+# set CMAKE_ARGS=-DGGML_CUDA=on
+# set FORCE_CMAKE=1
+# pip install llama-cpp-python --no-cache-dir --force-reinstall --verbose
+

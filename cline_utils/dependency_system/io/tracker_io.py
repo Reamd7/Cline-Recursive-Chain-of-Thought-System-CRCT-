@@ -32,8 +32,8 @@ from cline_utils.dependency_system.core.dependency_grid import (
 # --- Core Imports ---
 from cline_utils.dependency_system.core.key_manager import KeyInfo
 from cline_utils.dependency_system.core.key_manager import (
-    get_key_from_path as get_key_string_from_path_global,  # string from global map for a path
-)
+    get_key_from_path as get_key_string_from_path_global,
+)  # string from global map for a path
 from cline_utils.dependency_system.core.key_manager import (
     get_sortable_parts_for_key,
     load_global_key_map,
@@ -41,8 +41,8 @@ from cline_utils.dependency_system.core.key_manager import (
     sort_key_strings_hierarchically,
 )
 from cline_utils.dependency_system.core.key_manager import (
-    sort_keys as sort_key_info_objects,  # Takes List[KeyInfo], sorts by tier then key_string
-)
+    sort_keys as sort_key_info_objects,
+)  # Takes List[KeyInfo], sorts by tier then key_string
 from cline_utils.dependency_system.core.key_manager import (
     validate_key as validate_key_format,
 )
@@ -111,7 +111,7 @@ def build_path_migration_map(
         Returns keys as None if the path didn't exist in that state or if maps are missing.
     """
     path_migration_info: PathMigrationInfo = {}
-    logger.info("Building path migration map based on global key maps...")
+    logger.debug("Building path migration map based on global key maps...")
     # Create reverse lookups (Path -> Key)
     old_path_to_key: Dict[str, str] = {}
     new_path_to_key: Dict[str, str] = {}
@@ -166,7 +166,7 @@ def build_path_migration_map(
         new_paths - old_paths if old_global_map else set()
     )  # If no old map, all new paths are 'added' contextually
 
-    logger.info(
+    logger.debug(
         f"Path comparison: Stable={len(stable_paths)}, Removed={len(removed_paths)}, Added={len(added_paths)}"
     )
 
@@ -184,7 +184,7 @@ def build_path_migration_map(
         new_key = new_path_to_key.get(path)
         path_migration_info[path] = (None, new_key)
 
-    logger.info(
+    logger.debug(
         f"Path migration map built with {len(path_migration_info)} total path entries."
     )
     return path_migration_info
@@ -597,7 +597,7 @@ def write_tracker_file(
                 current_global_map,
                 global_key_counts,
             )
-        logger.info(
+        logger.debug(
             f"Successfully wrote tracker file: {tracker_path} with {len(key_info_to_write)} key instances."
         )
         # Invalidate cache for this specific tracker file after writing
@@ -638,7 +638,7 @@ def backup_tracker_file(tracker_path: str) -> str:
         backup_filename = f"{base_name}.{timestamp}.bak"
         backup_path = os.path.join(backup_dir_abs, backup_filename)
         shutil.copy2(tracker_path, backup_path)
-        logger.info(
+        logger.debug(
             f"Backed up tracker '{base_name}' to: {os.path.basename(backup_path)}"
         )
 
@@ -1143,7 +1143,9 @@ def get_mini_tracker_path(module_path: str) -> str:
     if "get_tracker_path" in mini_data_config and callable(
         mini_data_config["get_tracker_path"]
     ):
-        return normalize_path(str(mini_data_config["get_tracker_path"](norm_module_path)))
+        return normalize_path(
+            str(mini_data_config["get_tracker_path"](norm_module_path))
+        )
     else:  # Fallback standard naming convention
         module_name = os.path.basename(norm_module_path)
         raw_path = os.path.join(norm_module_path, f"{module_name}_module.md")
@@ -1385,7 +1387,7 @@ def _load_ast_verified_links() -> List[Dict[str, str]]:
             new_e["target_path"] = tp
             new_e["char"] = ch
             normed.append(new_e)
-        logger.info(
+        logger.debug(
             f"Successfully loaded {len(normed)} AST-verified links from {ast_links_path} (deduplicated)."
         )
         return normed
@@ -1422,7 +1424,7 @@ def update_tracker(
     # --- AST Override for Doc Tracker ---
     if tracker_type == "doc":
         apply_ast_overrides = False
-        logger.info("AST overrides are disabled for doc_tracker updates.")
+        logger.debug("AST overrides are disabled for doc_tracker updates.")
     """
     Updates or creates a tracker file based on type using contextual keys.
     Invalidates cache on changes.
@@ -1430,7 +1432,7 @@ def update_tracker(
     Calls tracker-specific logic for filtering, aggregation (main), and path determination.
     Uses hierarchical sorting for key strings.
     """
-    logger.info(
+    logger.debug(
         f"--- update_tracker CALLED --- Suggestion: '{output_file_suggestion}', Type: '{tracker_type}', ForceSugg: {force_apply_suggestions}, ApplyAST: {apply_ast_overrides}"
     )
     # --- Initialize counters and flags ---
@@ -1448,7 +1450,9 @@ def update_tracker(
     # functions (like key_in_doc_root) can safely reference it during consolidation.
     def is_path_in_doc_roots(path: str, doc_roots_set: Set[str]) -> bool:
         norm_item_p = normalize_path(path)
-        return any(is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set)
+        return any(
+            is_subpath(norm_item_p, dr) or norm_item_p == dr for dr in doc_roots_set
+        )
 
     # Mini-tracker import counters/flags
     native_foreign_import_ct, foreign_foreign_import_ct = 0, 0
@@ -1621,7 +1625,7 @@ def update_tracker(
                 f"Mini Update Critical: get_mini_tracker_path for '{module_path_for_mini}' fail: {ve}."
             )
             return
-        logger.info(
+        logger.debug(
             f"Mini Tracker Update Cycle: Module='{module_path_for_mini}', File='{output_file}' (Key: {module_ki_obj_for_path.key_string})"
         )
 
@@ -1777,7 +1781,7 @@ def update_tracker(
                 f"Mini Tracker '{os.path.basename(output_file)}': Clearing {len(suggestions_to_process_for_this_tracker)} non-forced suggestions."
             )
             suggestions_to_process_for_this_tracker.clear()
-        logger.info(
+        logger.debug(
             f"Mini Tracker: Populated suggestions_to_process (count: {sum(len(v) for v in suggestions_to_process_for_this_tracker.values())})"
         )
     else:
@@ -1807,7 +1811,7 @@ def update_tracker(
             f"{tracker_type.capitalize()} tracker '{os.path.basename(output_file)}' (for module: '{module_path_for_mini if tracker_type=='mini' else 'N/A'}') has 0 relevant key-path instances for its grid. May result in an empty tracker."
         )
     else:
-        logger.info(
+        logger.debug(
             f"{tracker_type.capitalize()} tracker '{os.path.basename(output_file)}': Final sorted list has {len(final_key_info_list)} key-path instances for grid."
         )
 
@@ -2187,7 +2191,7 @@ def update_tracker(
 
     # --- Copy old values (Using Path Migration Map) ---
 
-    logger.info(
+    logger.debug(
         f"Copying old grid values for '{os.path.basename(output_file)}' (using path migration map)..."
     )
     copied_values_count_log: int = 0
@@ -2386,7 +2390,7 @@ def update_tracker(
                     f"  Grid Copy Error during migration for row of old path '{old_row_path_in_tracker_def}': {e_decompress_migrate}"
                 )
                 row_proc_err_log += 1
-        logger.info(
+        logger.debug(
             f"Grid migration for '{os.path.basename(output_file)}': Copied {copied_values_count_log}, Skipped(Unstable/Path Issue): {skipped_instab_log}, Skipped(Target Filled): {skipped_filled_log}, Row Errors: {row_proc_err_log}"
         )
     else:
@@ -2453,7 +2457,7 @@ def update_tracker(
     if (
         tracker_type == "mini" and module_path_for_mini
     ):  # Ensure module_path_for_mini is correctly set
-        logger.info(
+        logger.debug(
             f"Mini Tracker ({os.path.basename(module_path_for_mini)}): Importing established relationships from other trackers..."
         )
 
@@ -2668,7 +2672,7 @@ def update_tracker(
                                 grid_content_changed_by_imports = True
 
         if native_foreign_import_ct > 0:
-            logger.info(
+            logger.debug(
                 f"  Import: {native_foreign_import_ct} native <-> foreign relationships potentially updated."
             )
 
@@ -2787,7 +2791,7 @@ def update_tracker(
                         foreign_foreign_import_ct += 1
                         grid_content_changed_by_imports = True
         if foreign_foreign_import_ct > 0:
-            logger.info(
+            logger.debug(
                 f"  Import: {foreign_foreign_import_ct} foreign <-> foreign relationships potentially updated."
             )
 
@@ -2801,7 +2805,7 @@ def update_tracker(
     ast_overrides_applied_count = 0  # Initialize here for clarity
 
     if globally_instanced_suggestions_to_apply:
-        logger.info(
+        logger.debug(
             f"Applying {sum(len(v) for v in globally_instanced_suggestions_to_apply.values())} globally-instanced suggestions to grid for '{os.path.basename(output_file)}' (Force Apply: {force_apply_suggestions})"
         )
 
@@ -3007,7 +3011,7 @@ def update_tracker(
     # --- Final Grid Consolidation ---
     consolidation_changes_ct = 0
     if final_key_info_list:  # Only run if grid is not empty
-        logger.info(
+        logger.debug(
             f"Consolidating grid for '{os.path.basename(output_file)}' against global highest-priority relationships..."
         )
         try:
@@ -3020,7 +3024,7 @@ def update_tracker(
                 # aggregate_all_dependencies expects path_migration_info, which should be available
                 # It returns Dict[Tuple[current_source_key_str, current_target_key_str], Tuple[char, Set[origin_paths]]]
                 globally_aggregated_links_with_origins = aggregate_all_dependencies(
-                    all_tracker_paths_for_agg, path_migration_info, path_to_key_info
+                    all_tracker_paths_for_agg, path_migration_info, path_to_key_info, show_progress=False
                 )
 
                 global_authoritative_rels: Dict[Tuple[str, str], str] = {
@@ -3033,7 +3037,7 @@ def update_tracker(
 
                 # DOC TRACKER CONSOLIDATION SCOPE
                 if tracker_type == "doc":
-                    logger.info(
+                    logger.debug(
                         f"Doc Tracker Consolidation: Scoping relationships to doc roots."
                     )
 
@@ -3041,12 +3045,14 @@ def update_tracker(
                     for ki in path_to_key_info.values():
                         key_string_to_kis[ki.key_string].append(ki)
 
-
                     def key_in_doc_root(key_str: str) -> bool:
                         kis = key_string_to_kis.get(key_str)
                         if not kis:
                             return False
-                        return any(is_path_in_doc_roots(ki.norm_path, abs_doc_roots_set) for ki in kis)
+                        return any(
+                            is_path_in_doc_roots(ki.norm_path, abs_doc_roots_set)
+                            for ki in kis
+                        )
 
                     scoped_rels = {
                         (src_key, tgt_key): char
@@ -3124,7 +3130,7 @@ def update_tracker(
                                 )
 
                 if consolidation_changes_ct > 0:
-                    logger.info(
+                    logger.debug(
                         f"Consolidation applied {consolidation_changes_ct} updates to '{os.path.basename(output_file)}' based on global relationships."
                     )
                 else:
@@ -3347,7 +3353,7 @@ def update_tracker(
                     f"Mini Pruning: No foreign keys pruned for '{os.path.basename(output_file)}'."
                 )
         else:  # force_apply_suggestions is True for this mini_tracker update
-            logger.info(
+            logger.debug(
                 f"Mini Tracker ({os.path.basename(output_file)}): Skipping foreign key pruning because force_apply_suggestions is True."
             )
     elif tracker_type == "doc" and final_key_info_list:
@@ -3483,7 +3489,7 @@ def update_tracker(
         # If performance is an issue, pre-populating or passing a shared cache might be better.
         # For now, relying on the caching within get_key_global_instance_string.
 
-        logger.info(
+        logger.debug(
             f"Applying {len(ast_links)} AST-verified links to the current grid state..."
         )
 
@@ -3658,7 +3664,7 @@ def update_tracker(
                     )
 
         if overrides_applied_count > 0:
-            logger.info(
+            logger.debug(
                 f"AST Overrides: Applied/updated {overrides_applied_count} relationships in the grid based on AST-verified links."
             )
 
@@ -3669,7 +3675,7 @@ def update_tracker(
         if final_key_info_list:
             loaded_ast_links = _load_ast_verified_links()
             if loaded_ast_links:
-                logger.info(
+                logger.debug(
                     f"Applying AST-verified overrides to grid for tracker: {os.path.basename(output_file)}"
                 )
                 ast_overrides_applied_count = _apply_ast_verified_overrides(  # This function was defined in previous step
@@ -3689,7 +3695,7 @@ def update_tracker(
                 f"Grid for {os.path.basename(output_file)} is empty. Skipping AST override step."
             )
     else:  # apply_ast_overrides is False
-        logger.info(
+        logger.debug(
             f"Skipping AST override step as per caller request for {os.path.basename(output_file)}."
         )
     # --- END OF AST OVERRIDE CALL ---
@@ -3793,7 +3799,7 @@ def update_tracker(
     # --- END OF SECTION: Compress final grid ---
 
     # --- Final Write ---
-    logger.info(f"Finalizing write for tracker: {output_file}")
+    logger.debug(f"Finalizing write for tracker: {output_file}")
 
     # Precompute global key counts ONCE before final write for efficiency
     final_global_key_counts = defaultdict(int)
@@ -3829,7 +3835,7 @@ def update_tracker(
             path_to_key_info,
             module_path_for_mini,  # Pass for template formatting {module_name}
         )
-        logger.info(
+        logger.debug(
             f"Mini tracker '{os.path.basename(output_file)}' write process completed."
         )
     else:  # Main or Doc
@@ -3846,7 +3852,7 @@ def update_tracker(
             )
             return  # Do not invalidate caches if write failed
 
-    logger.info(f"Tracker update process for '{output_file}' completed successfully.")
+    logger.debug(f"Tracker update process for '{output_file}' completed successfully.")
     # --- END OF SECTION: Final Write ---
 
     # --- Cache Invalidation ---

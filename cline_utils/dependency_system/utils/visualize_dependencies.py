@@ -20,14 +20,7 @@ from cline_utils.dependency_system.utils.tracker_utils import (
     resolve_key_global_instance_to_ki,
 )
 
-from ..core.dependency_grid import DIAGONAL_CHAR  # For skipping self-loops if necessary
-
-# Assuming these are the correct relative import paths based on the new file location
-from ..core.key_manager import (  # Assuming global_path_to_key_info_type is Dict[str, KeyInfo]
-    KeyInfo,
-    sort_key_strings_hierarchically,
-)
-from ..io import tracker_io  # For aggregate_all_dependencies
+from ..core.key_manager import KeyInfo, sort_key_strings_hierarchically
 from ..utils.config_manager import ConfigManager  # To get priorities etc.
 from ..utils.path_utils import get_project_root  # For path normalization
 from ..utils.path_utils import normalize_path
@@ -99,10 +92,26 @@ def _create_mermaid_config_file(directory: str) -> str:
     config_path = os.path.join(directory, "mermaid_config.json")
     # Increased limits to handle large diagrams
     config_data = {
-        "maxEdges": 3000,
+        "maxEdges": 3500,
         "maxTextSize": 200000,
-        "flowchart": {"useMaxWidth": False, "defaultRenderer": "elk"},
-        "layout": "elk.force",  # elk.layered/stress/force/mrtree/sporeOverlap
+        "flowchart": {
+            "useMaxWidth": False,
+            "useMaxHeight": False,
+            "defaultRenderer": "dagre",
+            "dagre": {"nodeSpacing": 1, "rankSpacing": 10000},
+            "elk": {
+                "algorithm": "layered",
+                "org.eclipse.elk.direction": "DOWN",
+                "org.eclipse.elk.edgeRouting": "ORTHOGONAL",
+                "org.eclipse.elk.layered.spacing.nodeNodeBetweenLayers": ".05",
+                "org.eclipse.elk.spacing.nodeNode": ".03",
+                "nodePlacementStrategy": "LINEAR_SEGMENTS",
+                "org.eclipse.elk.layered.unnecessaryBendpoints": False,
+                "org.eclipse.elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+                "org.eclipse.elk.layered.cycleBreakingStrategy": "GREEDY",
+                "elk.mergeEdges": True,
+            },
+        },
     }
 
     # Only write the file if it doesn't already exist to avoid unnecessary disk I/O.
@@ -110,9 +119,7 @@ def _create_mermaid_config_file(directory: str) -> str:
         try:
             with open(config_path, "w") as f:
                 json.dump(config_data, f, indent=2)
-            logger.info(
-                f"Created Mermaid config file (using ELK renderer) at: {config_path}"
-            )
+            logger.debug(f"Created Mermaid config file at: {config_path}")
         except IOError as e:
             logger.error(f"Could not write Mermaid config file: {e}")
             return ""
@@ -132,7 +139,7 @@ def render_mermaid_to_image(mermaid_syntax: str, output_file_path: str):
     output_dir = os.path.dirname(output_file_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        logger.info(f"Created directory for dependency diagrams: {output_dir}")
+        logger.debug(f"Created directory for dependency diagrams: {output_dir}")
 
     mermaid_config_path = _create_mermaid_config_file(output_dir)
 
@@ -161,7 +168,7 @@ def render_mermaid_to_image(mermaid_syntax: str, output_file_path: str):
             text=False,
             check=True,
         )
-        logger.info(
+        logger.debug(
             f"Successfully rendered high-resolution diagram to {output_file_path}"
         )
         if process.stderr:
@@ -177,9 +184,12 @@ def render_mermaid_to_image(mermaid_syntax: str, output_file_path: str):
         )
         logger.error("Installation: npm install -g @mermaid-js/mermaid-cli")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error during Mermaid rendering using '{mmdc_executable}': {e}")
+        logger.warning(
+            f"Error during Mermaid rendering using '{mmdc_executable}' with default config: {e}"
+        )
         error_output = e.stderr.decode("utf-8")
-        logger.error(f"Mermaid CLI Error Output:\n{error_output}")
+        logger.warning(f"Mermaid CLI Error Output:\n{error_output}")
+
         if "Edge limit exceeded" in error_output:
             # CORRECTED BUG: Use the correct variable name 'mermaid_config_path'
             logger.error(
@@ -220,6 +230,7 @@ def generate_mermaid_diagram(
     path_migration_info: PathMigrationInfo,
     all_tracker_paths_list: List[str],
     config_manager_instance: ConfigManager,
+    pre_aggregated_links: Optional[Dict[Tuple[str, str], Tuple[str, Set[str]]]] = None,
 ) -> Optional[str]:
     """
     Core logic to generate a Mermaid string for given focus keys or overall project.
@@ -235,7 +246,7 @@ def generate_mermaid_diagram(
         The Mermaid diagram string or None on critical failure.
         Returns a simple "no data" Mermaid string if no relevant items are found.
     """
-    logger.info(
+    logger.debug(
         f"Generating Mermaid diagram. Focus Keys Input: {focus_keys_list_input or 'Project Overview'}"
     )
 
@@ -272,19 +283,28 @@ def generate_mermaid_diagram(
                         f"Mermaid: Could not get GI string for resolved focus KI: {resolved_ki.norm_path}"
                     )
             # If get_globally_resolved_key_info_for_cli returns None, error was printed.
-    logger.info(
+    logger.debug(
         f"Mermaid: Resolved Focus KEY#GIs: {resolved_focus_keys_gi or 'Project Overview (no specific focus)'}"
     )
 
     try:
-        # --- CORRECTED CALL to aggregate_all_dependencies ---
-        aggregated_links_with_origins = (
-            aggregate_all_dependencies(  # From tracker_utils
-                set(all_tracker_paths_list),
-                path_migration_info,
-                global_path_to_key_info_map,  # Pass the current global map
+        if pre_aggregated_links is not None:
+            logger.debug(
+                f"Mermaid: Using pre-aggregated links (size: {len(pre_aggregated_links)})"
             )
-        )
+            aggregated_links_with_origins = pre_aggregated_links
+        else:
+            logger.debug(
+                "Mermaid: pre_aggregated_links is None, calling aggregate_all_dependencies"
+            )
+            # --- CORRECTED CALL to aggregate_all_dependencies ---
+            aggregated_links_with_origins = (
+                aggregate_all_dependencies(  # From tracker_utils
+                    set(all_tracker_paths_list),
+                    path_migration_info,
+                    global_path_to_key_info_map,  # Pass the current global map
+                )
+            )
         # Keys are now Tuple[src_KEY#GI, tgt_KEY#GI]
     except (
         ValueError
@@ -347,7 +367,7 @@ def generate_mermaid_diagram(
                     )
                     if gi_str_module_item:
                         keys_in_module_scope_gi.add(gi_str_module_item)
-            logger.info(
+            logger.debug(
                 f"Module view for {focus_key_gi_str}: {len(keys_in_module_scope_gi)} items in scope."
             )
         elif (
@@ -452,7 +472,7 @@ def generate_mermaid_diagram(
         if char_val != "d" and info1.is_directory != info2.is_directory:
             continue
         final_edges_to_draw_gi.append((k1_gi, k2_gi, char_val))
-    logger.info(f"Final count of KEY#GI edges to draw: {len(final_edges_to_draw_gi)}")
+    logger.debug(f"Final count of KEY#GI edges to draw: {len(final_edges_to_draw_gi)}")
 
     # Nodes to render are those involved in final edges, plus any explicitly focused keys
     nodes_to_render_gi = {
@@ -463,7 +483,7 @@ def generate_mermaid_diagram(
 
     if not nodes_to_render_gi:
         return "flowchart TB\n\n// No relevant data to visualize."
-    logger.info(
+    logger.debug(
         f"Final count of distinct KEY#GI nodes to render: {len(nodes_to_render_gi)}"
     )
 

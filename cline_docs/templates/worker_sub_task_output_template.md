@@ -3,7 +3,7 @@
 **Area Name:** [Area Name]
 **Specific Sub-Task Directive:** [Quote or accurately summarize the specific instruction from the Dispatcher]
 **Date Executed:** [YYYY-MM-DD HH:MM]
-**Status:** [ ] In Progress | [x] Completed | [ ] Failed | [ ] Revision Required
+**Status:** [ ] In Progress | [ ] Completed | [ ] Failed | [ ] Revision Required
 
 ## Context Considered
 

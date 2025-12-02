@@ -208,4 +208,4 @@ graph TD
         W_S3_FinalMUP --> W_End[Use <attempt_completion>];
     end
 ```
-*Note: The Worker's role is highly focused on executing a single, well-defined planning sub-task with minimal context, then reporting its specific outputs back to the Dispatcher.*
+*Note: The Worker's role is highly focused on executing a single, well-defined planning sub-task with minimal context, then reporting its specific outputs back to the Dispatcher. When creating new files be sure to reference the appripriate template file located in `cline_docs\templates`.*
