@@ -1,107 +1,232 @@
 # analysis/project_analyzer.py
+# ==============================================================================
+# 项目分析器 - Project Analyzer
+# ==============================================================================
+# 功能说明 (Function Description):
+#   这是整个依赖系统的核心分析引擎,负责协调和执行项目级的依赖分析流程。
+#   主要职责包括:
+#   1. 文件识别与过滤 - 根据配置识别需要分析的文件
+#   2. 密钥生成 - 为每个文件/目录生成唯一的上下文密钥
+#   3. 文件分析 - 使用AST等技术分析代码结构和依赖关系
+#   4. 符号映射 - 构建项目级的符号映射表
+#   5. 嵌入生成 - 生成文件的向量表示用于语义相似度计算
+#   6. 依赖建议 - 基于结构和语义分析建议依赖关系
+#   7. 跟踪器更新 - 更新mini/doc/main三级跟踪器
+#   8. 模板生成 - 生成最终审查清单等模板
+#   9. 可视化 - 自动生成Mermaid依赖图
+# ==============================================================================
 
-import fnmatch
-import json
-import logging
-import os
-import shutil
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+# ========================================
+# 标准库导入 (Standard Library Imports)
+# ========================================
+import fnmatch  # 用于文件名模式匹配 (for filename pattern matching)
+import json  # 用于JSON数据处理 (for JSON data handling)
+import logging  # 用于日志记录 (for logging)
+import os  # 用于操作系统接口 (for OS interface)
+import shutil  # 用于高级文件操作 (for high-level file operations)
+from collections import defaultdict  # 用于默认字典 (for default dict)
+from typing import Any, Dict, List, Optional, Tuple  # 用于类型注解 (for type annotations)
 
-from cline_utils.dependency_system.analysis import embedding_manager
-from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
+# ========================================
+# 依赖系统内部导入 (Internal Dependency System Imports)
+# ========================================
+from cline_utils.dependency_system.analysis import embedding_manager  # 嵌入管理器模块 (embedding manager module)
+from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file  # 文件分析函数 (file analysis function)
 from cline_utils.dependency_system.analysis.dependency_suggester import (
-    suggest_dependencies,
+    suggest_dependencies,  # 依赖建议函数 (dependency suggestion function)
 )
-from cline_utils.dependency_system.analysis.embedding_manager import generate_embeddings
-from cline_utils.dependency_system.core import key_manager
-from cline_utils.dependency_system.io import tracker_io
+from cline_utils.dependency_system.analysis.embedding_manager import generate_embeddings  # 嵌入生成函数 (embedding generation function)
+from cline_utils.dependency_system.core import key_manager  # 密钥管理器 (key manager)
+from cline_utils.dependency_system.io import tracker_io  # 跟踪器IO模块 (tracker I/O module)
 from cline_utils.dependency_system.utils.batch_processor import (
-    BatchProcessor,
-    process_items,
+    BatchProcessor,  # 批处理器类 (batch processor class)
+    process_items,  # 批量处理项目函数 (batch process items function)
 )
 from cline_utils.dependency_system.utils.cache_manager import (
-    cache_manager,
-    cached,
-    clear_all_caches,
-    file_modified,
+    cache_manager,  # 缓存管理器 (cache manager)
+    cached,  # 缓存装饰器 (cache decorator)
+    clear_all_caches,  # 清除所有缓存函数 (clear all caches function)
+    file_modified,  # 文件修改检测函数 (file modified detection function)
 )
-from cline_utils.dependency_system.utils.config_manager import ConfigManager
+from cline_utils.dependency_system.utils.config_manager import ConfigManager  # 配置管理器 (configuration manager)
 from cline_utils.dependency_system.utils.path_utils import (
-    get_project_root,
-    is_subpath,
-    normalize_path,
+    get_project_root,  # 获取项目根目录函数 (get project root function)
+    is_subpath,  # 判断是否为子路径函数 (is subpath function)
+    normalize_path,  # 路径规范化函数 (path normalization function)
 )
-from cline_utils.dependency_system.utils.phase_tracker import PhaseTracker
+from cline_utils.dependency_system.utils.phase_tracker import PhaseTracker  # 阶段跟踪器 (phase tracker)
 from cline_utils.dependency_system.utils.template_generator import (
-    generate_final_review_checklist,
+    generate_final_review_checklist,  # 生成最终审查清单函数 (generate final review checklist function)
 )
 from cline_utils.dependency_system.utils.tracker_utils import (
-    aggregate_all_dependencies,
-    get_key_global_instance_string,
+    aggregate_all_dependencies,  # 聚合所有依赖函数 (aggregate all dependencies function)
+    get_key_global_instance_string,  # 获取密钥全局实例字符串函数 (get key global instance string function)
 )
 from cline_utils.dependency_system.utils.visualize_dependencies import (
-    generate_mermaid_diagram,
+    generate_mermaid_diagram,  # 生成Mermaid图函数 (generate mermaid diagram function)
 )
 
-logger = logging.getLogger(__name__)
+# ========================================
+# 日志配置 (Logging Configuration)
+# ========================================
+logger = logging.getLogger(__name__)  # 创建模块级日志记录器 (create module-level logger)
 
-# Type alias from tracker_io
+# ========================================
+# 类型别名定义 (Type Alias Definitions)
+# ========================================
+# 路径迁移信息类型: 映射路径到(旧密钥, 新密钥)元组
+# PathMigrationInfo type: maps path to (old_key, new_key) tuple
 PathMigrationInfo = Dict[str, Tuple[Optional[str], Optional[str]]]
 
-# --- ADDED: Constants for the new symbol map ---
-PROJECT_SYMBOL_MAP_FILENAME = "project_symbol_map.json"
-OLD_PROJECT_SYMBOL_MAP_FILENAME = "project_symbol_map_old.json"
+# ========================================
+# 常量定义 (Constant Definitions)
+# ========================================
+# --- 符号映射文件常量 (Symbol Map File Constants) ---
+PROJECT_SYMBOL_MAP_FILENAME = "project_symbol_map.json"  # 项目符号映射文件名 (project symbol map filename)
+OLD_PROJECT_SYMBOL_MAP_FILENAME = "project_symbol_map_old.json"  # 旧项目符号映射文件名 (old project symbol map filename)
 
-# --- Constants for the AST verified links file ---
-AST_VERIFIED_LINKS_FILENAME = "ast_verified_links.json"
-OLD_AST_VERIFIED_LINKS_FILENAME = "ast_verified_links_old.json"
+# --- AST验证链接文件常量 (AST Verified Links File Constants) ---
+AST_VERIFIED_LINKS_FILENAME = "ast_verified_links.json"  # AST验证链接文件名 (AST verified links filename)
+OLD_AST_VERIFIED_LINKS_FILENAME = "ast_verified_links_old.json"  # 旧AST验证链接文件名 (old AST verified links filename)
 
-
-# Caching for analyze_project (Consider if key_func needs more refinement)
+# ========================================
+# 缓存配置 (Cache Configuration)
+# ========================================
+# 注意: analyze_project的缓存当前被禁用,因为需要更精细的缓存键函数
+# Note: Caching for analyze_project is currently disabled because it needs more refined key_func
 # @cached("project_analysis",
 #        key_func=lambda force_analysis=False, force_embeddings=False, **kwargs:
 #        f"analyze_project:{normalize_path(get_project_root())}:{(os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 0)}:{force_analysis}:{force_embeddings}")
 
 
+# ==============================================================================
+# 主函数: analyze_project
+# ==============================================================================
 def analyze_project(
-    force_analysis: bool = False, force_embeddings: bool = False
-) -> Dict[str, Any]:
+    force_analysis: bool = False,  # 是否强制重新分析(忽略缓存) - Force reanalysis flag
+    force_embeddings: bool = False  # 是否强制重新生成嵌入 - Force embedding regeneration flag
+) -> Dict[str, Any]:  # 返回包含分析结果和状态的字典 - Returns dict with analysis results and status
     """
-    Analyzes all files in a project to identify dependencies between them,
-    initialize trackers, suggest dependencies using the new contextual key system,
-    and generate relevant project templates like the final review checklist.
-    Also auto-generates dependency diagrams if enabled.
+    项目分析主函数 - Main Project Analysis Function
+    ================================================
 
-    Args:
-        force_analysis: Bypass cache and force reanalysis of files
-        force_embeddings: Force regeneration of embeddings
-    Returns:
-        Dictionary containing project-wide analysis results and status
+    完整的项目依赖分析流程,包括:
+    Full project dependency analysis workflow, including:
+
+    1. 密钥生成 (Key Generation):
+       - 为所有文件/目录生成唯一的上下文密钥
+       - Generates unique contextual keys for all files/directories
+
+    2. 文件分析 (File Analysis):
+       - 使用AST分析代码结构
+       - Analyzes code structure using AST
+
+    3. 符号映射 (Symbol Mapping):
+       - 构建项目级符号映射表
+       - Builds project-level symbol map
+
+    4. 嵌入生成 (Embedding Generation):
+       - 生成文件的向量表示
+       - Generates vector representations of files
+
+    5. 依赖建议 (Dependency Suggestion):
+       - 基于结构和语义分析建议依赖
+       - Suggests dependencies based on structural and semantic analysis
+
+    6. 跟踪器更新 (Tracker Updates):
+       - 更新mini/doc/main三级跟踪器
+       - Updates mini/doc/main three-tier trackers
+
+    7. 模板生成 (Template Generation):
+       - 生成审查清单等模板
+       - Generates review checklists and templates
+
+    8. 可视化 (Visualization):
+       - 自动生成依赖图
+       - Auto-generates dependency diagrams
+
+    参数说明 (Arguments):
+    --------------------
+        force_analysis (bool):
+            是否强制重新分析所有文件,忽略缓存
+            If True, bypass cache and force reanalysis of all files
+            默认值: False
+
+        force_embeddings (bool):
+            是否强制重新生成所有嵌入向量
+            If True, force regeneration of all embeddings
+            默认值: False
+
+    返回值 (Returns):
+    ----------------
+        Dict[str, Any]: 包含以下键的字典 (Dictionary containing the following keys):
+            - status (str): 分析状态 - "success", "warning", "error", "skipped"
+            - message (str): 状态消息 - Status message
+            - warnings (List[str]): 警告列表 - List of warnings
+            - key_generation (Dict): 密钥生成结果 - Key generation results
+            - embedding_generation (Dict): 嵌入生成结果 - Embedding generation results
+            - dependency_suggestion (Dict): 依赖建议结果 - Dependency suggestion results
+            - tracker_updates (Dict): 跟踪器更新结果 - Tracker update results
+            - file_analysis (Dict): 文件分析结果 - File analysis results
+            - template_generation (Dict): 模板生成结果 - Template generation results
+            - auto_visualization (Dict): 自动可视化结果 - Auto visualization results
+            - symbol_map_generation (Dict): 符号映射生成结果 - Symbol map generation results
+
+    异常处理 (Exception Handling):
+    -----------------------------
+        捕获所有异常并返回错误状态而非抛出
+        Catches all exceptions and returns error status instead of raising
+
+    缓存策略 (Caching Strategy):
+    ---------------------------
+        - 文件分析结果会被缓存,基于文件修改时间
+          File analysis results are cached based on file modification time
+        - force_analysis=True 会清除所有缓存
+          force_analysis=True clears all caches
+        - 嵌入向量会被持久化到磁盘
+          Embeddings are persisted to disk
     """
-    # --- Initial Setup ---
-    embedding_manager.RERANKED_FILES = set()
-    embedding_manager.RERANKING_COUNTER = 0
-    config = ConfigManager()
-    project_root = get_project_root()
-    logger.info(f"Starting project analysis in directory: {project_root}")
+    # ========================================
+    # 阶段 1: 初始化设置
+    # Phase 1: Initial Setup
+    # ========================================
 
-    analyzer_batch_processor = BatchProcessor()
-    if force_analysis:
-        logger.info("Force analysis requested. Clearing all caches.")
-        clear_all_caches()
+    # 重置重排序统计信息 (Reset reranking statistics)
+    embedding_manager.RERANKED_FILES = set()  # 清空已重排序文件集合 (clear reranked files set)
+    embedding_manager.RERANKING_COUNTER = 0  # 重置重排序计数器 (reset reranking counter)
+
+    # 初始化配置管理器 (Initialize configuration manager)
+    config = ConfigManager()  # 加载项目配置 (load project configuration)
+
+    # 获取项目根目录 (Get project root directory)
+    project_root = get_project_root()  # 规范化的项目根路径 (normalized project root path)
+
+    # 记录分析开始 (Log analysis start)
+    logger.info(f"Starting project analysis in directory: {project_root}")  # 输出开始信息 (output start info)
+
+    # 创建批处理器实例 (Create batch processor instance)
+    analyzer_batch_processor = BatchProcessor()  # 用于并行处理文件分析 (for parallel file analysis)
+
+    # 处理强制分析标志 (Handle force analysis flag)
+    if force_analysis:  # 如果要求强制重新分析 (if force reanalysis is requested)
+        logger.info("Force analysis requested. Clearing all caches.")  # 记录缓存清除 (log cache clearing)
+        clear_all_caches()  # 清除所有缓存以确保完全重新分析 (clear all caches to ensure full reanalysis)
+
+    # 初始化分析结果字典 (Initialize analysis results dictionary)
+    # 这个字典将收集整个分析流程的所有结果和状态
+    # This dictionary will collect all results and status from the entire analysis workflow
     analysis_results: Dict[str, Any] = {
-        "status": "success",
-        "message": "Analysis initiated.",
-        "warnings": [],
-        "key_generation": {},
-        "embedding_generation": {},
-        "dependency_suggestion": {},
-        "tracker_updates": {},  # MUST BE INITIALIZED AS A DICT
-        "file_analysis": {},
-        "template_generation": {},
-        "auto_visualization": {},
-        "symbol_map_generation": {},  # NEW entry for symbol map status
+        "status": "success",  # 分析状态: success/warning/error/skipped (analysis status)
+        "message": "Analysis initiated.",  # 状态消息 (status message)
+        "warnings": [],  # 警告列表 (warnings list)
+        "key_generation": {},  # 密钥生成结果 (key generation results)
+        "embedding_generation": {},  # 嵌入生成结果 (embedding generation results)
+        "dependency_suggestion": {},  # 依赖建议结果 (dependency suggestion results)
+        "tracker_updates": {},  # 跟踪器更新结果 - 必须初始化为字典 (tracker update results - must be dict)
+        "file_analysis": {},  # 文件分析结果映射 (file analysis results map)
+        "template_generation": {},  # 模板生成结果 (template generation results)
+        "auto_visualization": {},  # 自动可视化结果 (auto visualization results)
+        "symbol_map_generation": {},  # 符号映射生成结果 - 新增 (symbol map generation results - new)
     }
     # --- Exclusion Setup ---
     excluded_dirs_rel = config.get_excluded_dirs()

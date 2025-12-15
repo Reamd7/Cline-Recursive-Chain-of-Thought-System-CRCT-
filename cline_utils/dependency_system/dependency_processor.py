@@ -1,105 +1,168 @@
 # dependency_processor.py
+# 依赖关系处理器 - 命令行入口模块
 
 """
 Main entry point for the dependency tracking system.
 Processes command-line arguments and delegates to appropriate handlers.
+
+依赖跟踪系统的主入口点。
+处理命令行参数并委托给适当的处理程序。
+
+该模块负责：
+1. 解析命令行参数
+2. 设置日志系统
+3. 调度各种命令处理器（分析、更新、导出等）
+4. 管理全局配置和键映射
 """
 
-import argparse
-import json
-import logging
-import os
-import subprocess
-import sys
-from collections import defaultdict
-from logging import LogRecord
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+# ========================================
+# 标准库导入
+# ========================================
+import argparse  # 命令行参数解析器
+import json  # JSON数据处理
+import logging  # 日志记录系统
+import os  # 操作系统接口
+import subprocess  # 子进程管理（用于运行外部命令）
+import sys  # 系统特定参数和函数
+from collections import defaultdict  # 默认字典（自动初始化）
+from logging import LogRecord  # 日志记录对象类型
+from typing import Any, Dict, List, Optional, Set, Tuple, Union  # 类型注解
 
-from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
+# ========================================
+# 内部模块导入 - 分析功能
+# ========================================
+from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file  # 单文件分析器
+from cline_utils.dependency_system.analysis.project_analyzer import analyze_project  # 项目级分析器
 
-# --- Analysis Imports ---
-from cline_utils.dependency_system.analysis.project_analyzer import analyze_project
-
-# --- Core Imports ---
+# ========================================
+# 内部模块导入 - 核心功能
+# ========================================
 from cline_utils.dependency_system.core.dependency_grid import (
-    DIAGONAL_CHAR,
-    EMPTY_CHAR,
-    PLACEHOLDER_CHAR,
-    compress,
-    decompress,
-    get_char_at,
+    DIAGONAL_CHAR,  # 对角线字符（表示自引用）
+    EMPTY_CHAR,  # 空字符（无依赖）
+    PLACEHOLDER_CHAR,  # 占位符字符（待验证的依赖）
+    compress,  # RLE压缩函数
+    decompress,  # RLE解压缩函数
+    get_char_at,  # 获取压缩字符串中指定索引的字符
 )
 from cline_utils.dependency_system.core.key_manager import (
-    KeyInfo,
-    get_sortable_parts_for_key,
-    load_global_key_map,
-    load_old_global_key_map,
+    KeyInfo,  # 键信息数据结构
+    get_sortable_parts_for_key,  # 获取键的可排序部分
+    load_global_key_map,  # 加载全局键映射
+    load_old_global_key_map,  # 加载旧版全局键映射（用于迁移）
 )
 
-# --- IO Imports ---
+# ========================================
+# 内部模块导入 - IO功能
+# ========================================
 from cline_utils.dependency_system.io.tracker_io import (
-    PathMigrationInfo,
-    build_path_migration_map,
-    export_tracker,
-    merge_trackers,
-    remove_path_from_tracker,
-    update_tracker,
+    PathMigrationInfo,  # 路径迁移信息类型
+    build_path_migration_map,  # 构建路径迁移映射
+    export_tracker,  # 导出跟踪器数据
+    merge_trackers,  # 合并跟踪器文件
+    remove_path_from_tracker,  # 从跟踪器中移除路径
+    update_tracker,  # 更新跟踪器文件
 )
-from cline_utils.dependency_system.utils.cache_manager import clear_all_caches
-from cline_utils.dependency_system.utils.config_manager import ConfigManager
+from cline_utils.dependency_system.utils.cache_manager import clear_all_caches  # 清除所有缓存
+from cline_utils.dependency_system.utils.config_manager import ConfigManager  # 配置管理器
 
-# --- Utility Imports ---
+# ========================================
+# 内部模块导入 - 工具函数
+# ========================================
 from cline_utils.dependency_system.utils.path_utils import (
-    get_project_root,
-    normalize_path,
+    get_project_root,  # 获取项目根目录
+    normalize_path,  # 标准化路径
 )
 from cline_utils.dependency_system.utils.template_generator import (
-    add_code_doc_dependency_to_checklist,
+    add_code_doc_dependency_to_checklist,  # 添加代码-文档依赖到检查清单
 )
 from cline_utils.dependency_system.utils.template_generator import (
-    get_item_type as get_item_type_for_checklist,
+    get_item_type as get_item_type_for_checklist,  # 获取项目类型（用于检查清单）
 )
 from cline_utils.dependency_system.utils.tracker_utils import (
-    find_all_tracker_paths,
-    get_globally_resolved_key_info_for_cli,
-    get_key_global_instance_string,
-    read_grid_from_lines,
-    read_key_definitions_from_lines,
-    resolve_key_global_instance_to_ki,
+    find_all_tracker_paths,  # 查找所有跟踪器文件路径
+    get_globally_resolved_key_info_for_cli,  # 为CLI获取全局解析的键信息
+    get_key_global_instance_string,  # 获取键的全局实例字符串（KEY#GI格式）
+    read_grid_from_lines,  # 从文件行中读取网格数据
+    read_key_definitions_from_lines,  # 从文件行中读取键定义
+    resolve_key_global_instance_to_ki,  # 将KEY#GI字符串解析为KeyInfo对象
 )
 from cline_utils.dependency_system.utils.visualize_dependencies import (
-    generate_mermaid_diagram,
+    generate_mermaid_diagram,  # 生成Mermaid图表
 )
 
-# Configure logging
-logger = logging.getLogger(__name__)
+# ========================================
+# 日志配置
+# ========================================
+logger = logging.getLogger(__name__)  # 获取当前模块的日志记录器
 
-# --- Constants ---
-KEY_DEFINITIONS_START_MARKER = "---KEY_DEFINITIONS_START---"
-KEY_DEFINITIONS_END_MARKER = "---KEY_DEFINITIONS_END---"
+# ========================================
+# 常量定义
+# ========================================
+# 跟踪器文件中键定义部分的标记
+KEY_DEFINITIONS_START_MARKER = "---KEY_DEFINITIONS_START---"  # 键定义开始标记
+KEY_DEFINITIONS_END_MARKER = "---KEY_DEFINITIONS_END---"  # 键定义结束标记
 
 
-# --- Helper Functions ---
+# ========================================
+# 辅助函数 (Helper Functions)
+# ========================================
+
 def _load_global_map_or_exit() -> Dict[str, KeyInfo]:
-    """Loads the global key map, exiting if it fails."""
-    logger.info("Loading global key map...")
-    path_to_key_info = load_global_key_map()
+    """
+    Loads the global key map, exiting if it fails.
+
+    加载全局键映射，如果失败则退出程序。
+
+    全局键映射是一个字典，将标准化路径映射到KeyInfo对象。
+    这是整个依赖跟踪系统的核心数据结构。
+
+    Returns:
+        Dict[str, KeyInfo]: 路径到KeyInfo对象的映射
+
+    Exits:
+        如果无法加载全局键映射，程序将以错误代码1退出
+    """
+    logger.info("Loading global key map...")  # 记录开始加载
+    path_to_key_info = load_global_key_map()  # 尝试加载全局键映射
+
+    # 检查是否成功加载
     if path_to_key_info is None:
+        # 向用户报告错误
         print("Error: Global key map not found or failed to load.", file=sys.stderr)
         print(
             "Please run 'analyze-project' first to generate the key map.",
             file=sys.stderr,
         )
-        logger.critical("Global key map missing or invalid. Exiting.")
-        sys.exit(1)
-    logger.info("Global key map loaded successfully.")
-    return path_to_key_info
+        logger.critical("Global key map missing or invalid. Exiting.")  # 记录严重错误
+        sys.exit(1)  # 退出程序
+
+    logger.info("Global key map loaded successfully.")  # 记录成功
+    return path_to_key_info  # 返回映射
 
 
 def is_parent_child(
     key1_str: str, key2_str: str, global_map: Dict[str, KeyInfo]
 ) -> bool:
-    """Checks if two keys represent a direct parent-child directory relationship."""
+    """
+    Checks if two keys represent a direct parent-child directory relationship.
+
+    检查两个键是否代表直接的父子目录关系。
+
+    这个函数用于确定两个路径是否有直接的层级关系，即一个是另一个的父目录。
+
+    Args:
+        key1_str: 第一个键字符串（例如 "1A1" 或 "1A1#2"）
+        key2_str: 第二个键字符串
+        global_map: 全局键映射（路径 -> KeyInfo）
+
+    Returns:
+        bool: 如果存在父子关系返回True，否则返回False
+    """
+    # ========================================
+    # 步骤1: 从全局映射中查找两个键的KeyInfo对象
+    # ========================================
+    # 使用生成器表达式查找匹配的KeyInfo
     info1 = next(
         (info for info in global_map.values() if info.key_string == key1_str), None
     )
@@ -107,76 +170,156 @@ def is_parent_child(
         (info for info in global_map.values() if info.key_string == key2_str), None
     )
 
+    # 检查是否找到了两个KeyInfo对象
     if not info1 or not info2:
         logger.debug(
             f"is_parent_child: Could not find KeyInfo for '{key1_str if not info1 else ''}' or '{key2_str if not info2 else ''}'. Returning False."
         )
-        return False  # Cannot determine relationship if info is missing
+        return False  # 如果信息缺失，无法确定关系
 
-    # Ensure paths are normalized (they should be from KeyInfo, but double-check)
-    path1 = normalize_path(info1.norm_path)
-    path2 = normalize_path(info2.norm_path)
-    parent1 = normalize_path(info1.parent_path) if info1.parent_path else None
-    parent2 = normalize_path(info2.parent_path) if info2.parent_path else None
+    # ========================================
+    # 步骤2: 标准化路径
+    # ========================================
+    # 确保路径已标准化（理论上KeyInfo中的路径应该已经标准化，但再次确认）
+    path1 = normalize_path(info1.norm_path)  # 第一个键的路径
+    path2 = normalize_path(info2.norm_path)  # 第二个键的路径
+    parent1 = normalize_path(info1.parent_path) if info1.parent_path else None  # 第一个键的父路径
+    parent2 = normalize_path(info2.parent_path) if info2.parent_path else None  # 第二个键的父路径
 
-    # Check both directions: info1 is parent of info2 OR info2 is parent of info1
-    is_parent1 = parent2 == path1
-    is_parent2 = parent1 == path2
+    # ========================================
+    # 步骤3: 检查双向父子关系
+    # ========================================
+    # 检查两个方向：info1是info2的父 或 info2是info1的父
+    is_parent1 = parent2 == path1  # info1是否为info2的父目录
+    is_parent2 = parent1 == path2  # info2是否为info1的父目录
 
     logger.debug(
         f"is_parent_child check: {key1_str}({path1}) vs {key2_str}({path2}). Is Parent1: {is_parent1}, Is Parent2: {is_parent2}"
     )
-    return is_parent1 or is_parent2
+    return is_parent1 or is_parent2  # 任一方向为真即返回True
 
 
-# --- Command Handlers ---
+# ========================================
+# 命令处理器 (Command Handlers)
+# ========================================
+# 每个命令处理器函数负责处理特定的CLI命令
 
 
 def command_handler_analyze_file(args: argparse.Namespace) -> int:
-    """Handle the analyze-file command."""
-    import json
+    """
+    Handle the analyze-file command.
+
+    处理analyze-file命令。
+
+    该命令分析单个文件，提取依赖关系、导入语句、函数定义等信息。
+
+    Args:
+        args: 命令行参数命名空间，包含：
+            - file_path: 要分析的文件路径
+            - output: （可选）保存结果的JSON文件路径
+
+    Returns:
+        int: 退出代码（0表示成功，1表示失败）
+    """
+    import json  # 导入json模块用于结果序列化
 
     try:
+        # ========================================
+        # 步骤1: 验证文件存在性
+        # ========================================
         if not os.path.exists(args.file_path):
             print(f"Error: File not found: {args.file_path}")
-            return 1
-        results = analyze_file(args.file_path)
+            return 1  # 文件不存在，返回错误代码
+
+        # ========================================
+        # 步骤2: 执行文件分析
+        # ========================================
+        results = analyze_file(args.file_path)  # 调用分析器分析文件
+
+        # ========================================
+        # 步骤3: 输出结果
+        # ========================================
         if args.output:
-            output_dir = os.path.dirname(args.output)
+            # 保存到指定的文件
+            output_dir = os.path.dirname(args.output)  # 获取输出目录
+            # 如果目录不存在，创建目录
             os.makedirs(output_dir, exist_ok=True) if output_dir else None
+            # 写入JSON文件
             with open(args.output, "w", encoding="utf-8") as f:
-                json.dump(results, f, indent=2)
+                json.dump(results, f, indent=2)  # 格式化输出，缩进2空格
             print(f"Analysis results saved to {args.output}")
         else:
-            print(json.dumps(results, indent=2))
-        return 0
+            # 直接打印到控制台
+            print(json.dumps(results, indent=2))  # 格式化输出
+
+        return 0  # 成功返回
+
     except Exception as e:
+        # 捕获所有异常并报告
         print(f"Error analyzing file: {str(e)}")
-        return 1
+        return 1  # 返回错误代码
 
 
 def command_handler_analyze_project(args: argparse.Namespace) -> int:
-    """Handle the analyze-project command."""
-    import json
+    """
+    Handle the analyze-project command.
 
-    original_cwd: Optional[str] = None  # Initialize to None
+    处理analyze-project命令。
+
+    该命令是整个依赖跟踪系统的核心，执行以下操作：
+    1. 分析整个项目的所有代码文件
+    2. 生成全局键映射（global key map）
+    3. 运行运行时检查器（runtime inspector）
+    4. 生成或更新嵌入向量（embeddings）
+    5. 更新所有跟踪器文件（trackers）
+    6. 生成依赖关系建议（suggestions）
+
+    Args:
+        args: 命令行参数命名空间，包含：
+            - project_root: 项目根目录路径（默认为当前目录）
+            - output: （可选）保存分析摘要的JSON文件路径
+            - force_analysis: 强制重新分析，绕过缓存
+            - force_embeddings: 强制重新生成嵌入向量
+            - force_validate: 强制重新验证资源，绕过缓存
+
+    Returns:
+        int: 退出代码（0表示成功，1表示失败）
+    """
+    import json  # 导入json模块
+
+    # ========================================
+    # 步骤1: 初始化和路径验证
+    # ========================================
+    original_cwd: Optional[str] = None  # 保存原始工作目录（初始化为None）
+
     try:
+        # 如果未指定项目根目录，默认使用当前目录
         if not args.project_root:
-            args.project_root = "."
+            args.project_root = "."  # 设置为当前目录
             logger.info(
                 f"Defaulting project root to CWD: {os.path.abspath(args.project_root)}"
             )
+
+        # 将项目根目录转换为绝对路径并标准化
         abs_project_root = normalize_path(os.path.abspath(args.project_root))
+
+        # 验证项目目录是否存在
         if not os.path.isdir(abs_project_root):
             print(f"Error: Project directory not found: {abs_project_root}")
-            return 1
-        original_cwd = os.getcwd()  # Assign after initialization
+            return 1  # 目录不存在，返回错误
+
+        # ========================================
+        # 步骤2: 切换工作目录到项目根目录
+        # ========================================
+        original_cwd = os.getcwd()  # 保存原始工作目录（在初始化后赋值）
+
+        # 如果项目根目录与当前工作目录不同，切换到项目根目录
         if abs_project_root != normalize_path(original_cwd):
             logger.info(
                 f"Temporarily changing CWD from '{original_cwd}' to project root: '{abs_project_root}' for analysis."
             )
-            os.chdir(abs_project_root)
-            _ = ConfigManager().config
+            os.chdir(abs_project_root)  # 切换工作目录
+            _ = ConfigManager().config  # 重新加载配置以匹配新的工作目录
 
         # Now that we are in the correct directory, get the config manager and run validation
         config_manager_instance = ConfigManager()
@@ -1672,10 +1815,25 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
 
 
 def main():
-    """Parse arguments and dispatch to handlers."""
-    parser = argparse.ArgumentParser(description="Dependency tracking system CLI")
+    """
+    Parse arguments and dispatch to handlers.
+
+    解析命令行参数并分派到相应的处理器。
+
+    该函数是整个依赖跟踪系统的入口点，负责：
+    1. 设置命令行参数解析器
+    2. 定义所有可用的子命令
+    3. 配置日志系统
+    4. 执行相应的命令处理器
+    """
+    # ========================================
+    # 步骤1: 创建主参数解析器
+    # ========================================
+    parser = argparse.ArgumentParser(description="Dependency tracking system CLI")  # 创建主解析器
     subparsers = parser.add_subparsers(
-        dest="command", help="Available commands", required=True
+        dest="command",  # 子命令将存储在这个属性中
+        help="Available commands",  # 帮助文本
+        required=True  # 必须指定一个子命令
     )
 
     # --- Analysis Commands ---
@@ -1889,22 +2047,38 @@ def main():
     )
     visualize_parser.set_defaults(func=handle_visualize_dependencies)
 
-    args = parser.parse_args()
+    # ========================================
+    # 步骤2: 解析命令行参数
+    # ========================================
+    args = parser.parse_args()  # 解析所有命令行参数
 
-    # --- Setup Logging ---
+    # ========================================
+    # 步骤3: 设置日志系统
+    # ========================================
+    # 配置日志格式：时间戳 - 模块名 - 日志级别 - 消息
     log_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
-    log_file_path: Optional[str] = None
+
+    # ========================================
+    # 步骤3a: 设置根日志记录器
+    # ========================================
+    root_logger = logging.getLogger()  # 获取根日志记录器
+    root_logger.setLevel(logging.DEBUG)  # 设置最低日志级别为DEBUG
+
+    # ========================================
+    # 步骤3b: 设置文件日志处理器（调试日志）
+    # ========================================
+    log_file_path: Optional[str] = None  # 初始化日志文件路径
     try:
+        # 在项目根目录创建debug.txt日志文件
         log_file_path = normalize_path(os.path.join(get_project_root(), "debug.txt"))
-        file_handler = logging.FileHandler(log_file_path, mode="w")
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(log_formatter)
-        root_logger.addHandler(file_handler)
+        file_handler = logging.FileHandler(log_file_path, mode="w")  # 写入模式（覆盖）
+        file_handler.setLevel(logging.DEBUG)  # 记录DEBUG及以上级别
+        file_handler.setFormatter(log_formatter)  # 应用格式化器
+        root_logger.addHandler(file_handler)  # 添加处理器到根日志记录器
     except Exception as e_fh:
+        # 如果设置文件日志失败，打印错误到stderr
         if log_file_path is not None:
             print(
                 f"Error setting up file logger {log_file_path}: {e_fh}", file=sys.stderr
@@ -1915,35 +2089,54 @@ def main():
                 file=sys.stderr,
             )
 
-    # File Handler specifically for suggestion-related logs (if desired)
-    suggestions_log_path: Optional[str] = None
+    # ========================================
+    # 步骤3c: 设置建议日志处理器（专门用于依赖建议）
+    # ========================================
+    suggestions_log_path: Optional[str] = None  # 初始化建议日志文件路径
     try:
+        # 在项目根目录创建suggestions.log文件
         suggestions_log_path = normalize_path(
             os.path.join(get_project_root(), "suggestions.log")
         )
-        suggestion_handler = logging.FileHandler(suggestions_log_path, mode="w")
-        suggestion_handler.setLevel(logging.DEBUG)
-        suggestion_handler.setFormatter(log_formatter)
+        suggestion_handler = logging.FileHandler(suggestions_log_path, mode="w")  # 写入模式
+        suggestion_handler.setLevel(logging.DEBUG)  # 记录DEBUG及以上级别
+        suggestion_handler.setFormatter(log_formatter)  # 应用格式化器
 
+        # 定义建议日志过滤器类
         class SuggestionLogFilter(logging.Filter):
+            """
+            Filter to only log suggestion-related messages.
+            过滤器，仅记录与建议相关的消息。
+            """
             def filter(self, record: LogRecord) -> bool:
+                """
+                Determine if the log record should be logged.
+                判断日志记录是否应该被记录。
+
+                Returns:
+                    bool: True if the record is from suggestion-related modules
+                """
                 return (
+                    # 来自依赖建议器模块
                     record.name.startswith(
                         "cline_utils.dependency_system.analysis.dependency_suggester"
                     )
+                    # 或来自项目分析器且消息包含"suggestion"
                     or record.name.startswith(
                         "cline_utils.dependency_system.analysis.project_analyzer"
                     )
                     and "suggestion" in record.getMessage().lower()
+                    # 或来自跟踪器IO且消息包含"suggestion"
                     or record.name.startswith(
                         "cline_utils.dependency_system.io.tracker_io"
                     )
                     and "suggestion" in record.getMessage().lower()
                 )
 
-        suggestion_handler.addFilter(SuggestionLogFilter())
-        root_logger.addHandler(suggestion_handler)
+        suggestion_handler.addFilter(SuggestionLogFilter())  # 添加过滤器
+        root_logger.addHandler(suggestion_handler)  # 添加处理器到根日志记录器
     except Exception as e_sh:
+        # 如果设置建议日志失败，打印错误到stderr
         if suggestions_log_path is not None:
             print(
                 f"Error setting up suggestions logger {suggestions_log_path}: {e_sh}",
@@ -1955,20 +2148,30 @@ def main():
                 file=sys.stderr,
             )
 
-    # Console Handler for user-facing messages (INFO and above)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-    root_logger.addHandler(console_handler)
+    # ========================================
+    # 步骤3d: 设置控制台日志处理器（用户可见消息）
+    # ========================================
+    console_handler = logging.StreamHandler(sys.stdout)  # 输出到标准输出
+    console_handler.setLevel(logging.INFO)  # 只显示INFO及以上级别（隐藏DEBUG）
+    console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))  # 简化格式
+    root_logger.addHandler(console_handler)  # 添加处理器到根日志记录器
 
-    # Execute command
+    # ========================================
+    # 步骤4: 执行命令
+    # ========================================
+    # 检查是否有与命令关联的处理函数
     if hasattr(args, "func"):
-        exit_code = args.func(args)
-        sys.exit(exit_code)
+        # 调用相应的命令处理器函数
+        exit_code = args.func(args)  # 执行命令处理器并获取退出代码
+        sys.exit(exit_code)  # 以相应的退出代码退出程序
     else:
-        parser.print_help()
-        sys.exit(1)
+        # 如果没有有效的命令，显示帮助信息
+        parser.print_help()  # 打印帮助文本
+        sys.exit(1)  # 以错误代码退出
 
 
+# ========================================
+# 程序入口点
+# ========================================
 if __name__ == "__main__":
-    main()
+    main()  # 如果直接运行此脚本，调用main函数

@@ -1,192 +1,473 @@
 # analysis/symbol_map_merger.py
 """
-Merges runtime_symbols.json (from runtime_inspector) with AST analysis data
-to create a comprehensive project_symbol_map.json that combines the best of both:
-- Runtime: Rich type info, inheritance, signatures, clean source
-- AST: Imports, call graphs, file metadata
+符号映射合并器 - Symbol Map Merger
+
+功能概述：
+----------
+该模块负责将运行时检查器(runtime_inspector)生成的runtime_symbols.json
+与AST分析数据进行合并，创建一个综合的project_symbol_map.json文件。
+这个文件结合了两种分析方法的优势：
+
+运行时检查(Runtime)的优势：
+- 丰富的类型信息(type hints)
+- 准确的继承关系(inheritance)
+- 完整的函数签名(signatures)
+- 干净的源代码上下文(source context)
+
+AST分析的优势：
+- 导入语句列表(imports)
+- 调用图谱(call graphs)
+- 文件元数据(file metadata)
+
+合并策略：
+----------
+1. 以运行时符号为基础（更准确的类型信息）
+2. 用AST分析数据增强（补充静态分析信息）
+3. 对于运行时检查失败的文件，使用纯AST数据作为后备
+
+使用场景：
+----------
+- 在依赖分析系统中创建统一的符号索引
+- 为代码搜索和导航提供全面的元数据
+- 支持智能依赖推荐和代码理解
+
+作者：Cline Dependency System
+版本：v8.0.0
 """
 
-import json
-import logging
-import os
-from typing import Dict, Any, List
+# ============================================================================
+# 标准库导入
+# ============================================================================
+import json          # JSON序列化和反序列化
+import logging       # 日志记录
+import os            # 文件系统操作
+from typing import Dict, Any, List  # 类型标注
 
+# ============================================================================
+# 项目内部导入
+# ============================================================================
 from cline_utils.dependency_system.utils.path_utils import normalize_path, get_project_root
 
+# ============================================================================
+# 日志配置
+# ============================================================================
+# 创建模块级别的日志记录器，使用当前模块名作为标识
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# 核心合并函数
+# ============================================================================
 def merge_runtime_and_ast(
-    runtime_symbols: Dict[str, Dict[str, Any]],
-    ast_analysis: Dict[str, Dict[str, Any]]
-) -> Dict[str, Dict[str, Any]]:
+    runtime_symbols: Dict[str, Dict[str, Any]],  # 运行时符号数据
+    ast_analysis: Dict[str, Dict[str, Any]]      # AST分析数据
+) -> Dict[str, Dict[str, Any]]:                  # 返回合并后的符号映射
     """
-    Merges runtime inspector output with AST analysis.
-    
-    Runtime symbols provide the foundation with:
-    - Classes with inheritance, decorators, source_context
-    - Methods with signatures, type_annotations, scope_references
-    - Functions with full runtime metadata
-    
-    AST analysis adds:
-    - file_type metadata
-    - imports list
-    - calls list with line numbers
-    
-    Args:
-        runtime_symbols: Output from runtime_inspector.py
-        ast_analysis: Output from dependency_analyzer.py (AST-based)
-        
-    Returns:
-        Merged symbol map with runtime as primary, AST as enhancement
+    合并运行时检查器输出与AST分析结果
+
+    详细说明：
+    ----------
+    这是符号映射合并的核心函数，采用"运行时优先，AST增强"的策略。
+
+    运行时符号提供的核心数据：
+    - 类(Classes)：包含继承关系、装饰器、源代码上下文
+    - 方法(Methods)：包含函数签名、类型注解、作用域引用
+    - 函数(Functions)：包含完整的运行时元数据
+
+    AST分析添加的补充数据：
+    - 文件类型元数据(file_type)
+    - 导入语句列表(imports)
+    - 调用关系列表(calls)，包含行号信息
+
+    合并逻辑：
+    ----------
+    1. 遍历所有运行时符号，作为合并的基础
+    2. 查找对应的AST数据，添加AST特有字段
+    3. 按名称匹配类和函数，补充行号等AST元数据
+    4. 处理运行时检查失败的文件，使用纯AST数据
+
+    参数：
+    ------
+    runtime_symbols : Dict[str, Dict[str, Any]]
+        运行时检查器的输出数据，键为文件路径，值为符号信息
+    ast_analysis : Dict[str, Dict[str, Any]]
+        AST分析器的输出数据，键为文件路径，值为AST元数据
+
+    返回：
+    ------
+    Dict[str, Dict[str, Any]]
+        合并后的符号映射，以运行时数据为主，AST数据为辅
+
+    示例：
+    ------
+    >>> runtime = load_runtime_symbols()
+    >>> ast_data = load_ast_analysis()
+    >>> merged = merge_runtime_and_ast(runtime, ast_data)
+    >>> print(len(merged))  # 所有已分析文件的数量
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 初始化合并结果字典
+    # ------------------------------------------------------------------------
     merged_map = {}
-    
-    # Start with all runtime symbols
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 以运行时符号为基础进行合并
+    # ------------------------------------------------------------------------
+    # 遍历所有运行时符号数据，每个文件一个条目
     for file_path, runtime_data in runtime_symbols.items():
+        # 创建运行时数据的浅拷贝，避免修改原始数据
         merged = runtime_data.copy()
-        
-        # Get corresponding AST data
+
+        # ====================================================================
+        # 步骤2.1: 获取对应的AST数据
+        # ====================================================================
+        # 如果AST分析中没有该文件，返回空字典作为默认值
         ast_data = ast_analysis.get(file_path, {})
-        
-        # Add AST-specific fields that runtime can't capture
+
+        # ====================================================================
+        # 步骤2.2: 添加AST特有字段（运行时检查无法捕获的信息）
+        # ====================================================================
+        # 文件类型：默认为"py"（Python文件）
         merged["file_type"] = ast_data.get("file_type", "py")
+
+        # 导入列表：该文件中的所有import语句
         merged["imports"] = ast_data.get("imports", [])
+
+        # 调用列表：函数/方法调用关系，包含行号信息
         merged["calls"] = ast_data.get("calls", [])  # Call graph with line numbers
-        
-        # Enhance classes with AST metadata if available
+
+        # ====================================================================
+        # 步骤2.3: 增强类信息（如果AST中有对应数据）
+        # ====================================================================
+        # 获取运行时检查到的类列表
         runtime_classes = merged.get("classes", [])
+        # 获取AST分析到的类列表
         ast_classes = ast_data.get("classes", [])
-        
+
+        # 遍历每个运行时类，查找匹配的AST类信息
         for rt_class in runtime_classes:
-            # Find matching AST class by name
+            # ------------------------------------------------------------------
+            # 按名称查找匹配的AST类
+            # ------------------------------------------------------------------
+            # 使用next()和生成器表达式快速查找，如果没找到返回None
             matching_ast = next(
                 (c for c in ast_classes if c.get("name") == rt_class["name"]),
-                None
+                None  # 未找到时的默认值
             )
-            
+
+            # 如果找到了匹配的AST类
             if matching_ast:
-                # Add AST line numbers if not in runtime
+                # --------------------------------------------------------------
+                # 添加AST行号信息（如果运行时数据中没有）
+                # --------------------------------------------------------------
+                # AST可以提供准确的定义行号
                 if "line" in matching_ast and "line" not in rt_class:
                     rt_class["line"] = matching_ast["line"]
-        
-        # Enhance functions similarly
+
+        # ====================================================================
+        # 步骤2.4: 增强函数信息（同样的逻辑）
+        # ====================================================================
+        # 获取运行时检查到的函数列表
         runtime_functions = merged.get("functions", [])
+        # 获取AST分析到的函数列表
         ast_functions = ast_data.get("functions", [])
-        
+
+        # 遍历每个运行时函数，查找匹配的AST函数信息
         for rt_func in runtime_functions:
+            # ------------------------------------------------------------------
+            # 按名称查找匹配的AST函数
+            # ------------------------------------------------------------------
             matching_ast = next(
                 (f for f in ast_functions if f.get("name") == rt_func["name"]),
-                None
+                None  # 未找到时的默认值
             )
-            
+
+            # 如果找到了匹配的AST函数
             if matching_ast:
+                # --------------------------------------------------------------
+                # 添加AST行号信息（如果运行时数据中没有）
+                # --------------------------------------------------------------
                 if "line" in matching_ast and "line" not in rt_func:
                     rt_func["line"] = matching_ast["line"]
-        
+
+        # ====================================================================
+        # 步骤2.5: 将增强后的数据添加到结果映射中
+        # ====================================================================
         merged_map[file_path] = merged
-    
-    # Add any files that AST found but runtime missed
-    # (e.g., files that failed runtime inspection)
+
+    # ------------------------------------------------------------------------
+    # 步骤3: 添加AST发现但运行时遗漏的文件
+    # ------------------------------------------------------------------------
+    # 这些可能是运行时检查失败的文件（例如导入错误、语法错误等）
     for file_path, ast_data in ast_analysis.items():
+        # 检查该文件是否已经在合并映射中
         if file_path not in merged_map:
+            # 记录调试信息：该文件仅在AST分析中存在
             logger.debug(
                 f"File {file_path} in AST analysis but not in runtime symbols. "
                 f"Using AST-only data."
             )
+            # 直接使用AST数据作为后备
             merged_map[file_path] = ast_data
-    
+
+    # ------------------------------------------------------------------------
+    # 步骤4: 返回最终的合并结果
+    # ------------------------------------------------------------------------
     return merged_map
 
 
+# ============================================================================
+# 数据加载函数
+# ============================================================================
 def load_runtime_symbols(project_root: str = None) -> Dict[str, Dict[str, Any]]:
-    """Load runtime_symbols.json from core directory."""
+    """
+    从核心目录加载runtime_symbols.json文件
+
+    详细说明：
+    ----------
+    该函数负责加载运行时检查器生成的符号数据文件。文件位于固定路径：
+    <project_root>/cline_utils/dependency_system/core/runtime_symbols.json
+
+    错误处理：
+    ----------
+    - 如果文件不存在，记录警告并返回空字典
+    - 如果解析失败，记录错误并返回空字典
+
+    参数：
+    ------
+    project_root : str, optional
+        项目根目录的绝对路径，如果为None则自动获取
+
+    返回：
+    ------
+    Dict[str, Dict[str, Any]]
+        运行时符号数据，键为文件路径，值为符号信息
+        如果加载失败，返回空字典{}
+
+    示例：
+    ------
+    >>> symbols = load_runtime_symbols("/path/to/project")
+    >>> for file_path, symbols in symbols.items():
+    ...     print(f"{file_path}: {len(symbols['classes'])} classes")
+    """
+    # ------------------------------------------------------------------------
+    # 步骤1: 获取项目根目录
+    # ------------------------------------------------------------------------
+    # 如果未提供项目根目录，则自动获取
     if project_root is None:
         project_root = get_project_root()
-    
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 构建runtime_symbols.json的完整路径
+    # ------------------------------------------------------------------------
+    # 文件固定位于 cline_utils/dependency_system/core/ 目录下
     runtime_path = os.path.join(
-        project_root,
-        "cline_utils",
-        "dependency_system",
-        "core",
-        "runtime_symbols.json"
+        project_root,                  # 项目根目录
+        "cline_utils",                 # 工具包目录
+        "dependency_system",           # 依赖系统目录
+        "core",                        # 核心数据目录
+        "runtime_symbols.json"         # 运行时符号文件
     )
-    
+
+    # ------------------------------------------------------------------------
+    # 步骤3: 检查文件是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(runtime_path):
+        # 记录警告：文件未找到
         logger.warning(f"Runtime symbols file not found: {runtime_path}")
+        # 返回空字典，允许系统继续运行
         return {}
-    
+
+    # ------------------------------------------------------------------------
+    # 步骤4: 尝试加载和解析JSON文件
+    # ------------------------------------------------------------------------
     try:
+        # 以UTF-8编码打开文件（支持中文等多语言字符）
         with open(runtime_path, "r", encoding="utf-8") as f:
+            # 解析JSON内容并返回Python字典
             return json.load(f)
     except Exception as e:
+        # 记录错误：解析失败
         logger.error(f"Failed to load runtime symbols: {e}")
+        # 返回空字典，允许系统继续运行
         return {}
 
 
+# ============================================================================
+# 数据保存函数
+# ============================================================================
 def save_merged_symbol_map(
-    merged_map: Dict[str, Dict[str, Any]],
-    output_path: str,
-    backup_old: bool = True
+    merged_map: Dict[str, Dict[str, Any]],  # 合并后的符号映射
+    output_path: str,                       # 输出文件路径
+    backup_old: bool = True                 # 是否备份旧文件
 ) -> None:
     """
-    Save merged symbol map to project_symbol_map.json.
-    
-    Args:
-        merged_map: The merged runtime + AST symbol data
-        output_path: Path to save the new project_symbol_map.json
-        backup_old: Whether to backup existing file to project_symbol_map_old.json
+    保存合并后的符号映射到project_symbol_map.json
+
+    详细说明：
+    ----------
+    该函数将合并后的符号映射保存为JSON文件，并可选择性地备份旧文件。
+
+    保存特性：
+    ----------
+    1. 自动备份：如果文件已存在，可以备份为 *_old.json
+    2. 美化格式：使用缩进和非ASCII字符保存，提高可读性
+    3. 错误处理：备份失败仅警告，保存失败则抛出异常
+
+    参数：
+    ------
+    merged_map : Dict[str, Dict[str, Any]]
+        合并后的运行时+AST符号数据
+    output_path : str
+        保存新文件的绝对路径（通常是project_symbol_map.json）
+    backup_old : bool, default=True
+        是否备份现有文件为 project_symbol_map_old.json
+
+    异常：
+    ------
+    Exception
+        如果保存文件失败，会抛出异常（备份失败仅警告）
+
+    示例：
+    ------
+    >>> merged = merge_runtime_and_ast(runtime, ast)
+    >>> output = "/path/to/project_symbol_map.json"
+    >>> save_merged_symbol_map(merged, output, backup_old=True)
     """
-    # Backup existing file if requested
+    # ------------------------------------------------------------------------
+    # 步骤1: 备份现有文件（如果需要且文件存在）
+    # ------------------------------------------------------------------------
     if backup_old and os.path.exists(output_path):
+        # ====================================================================
+        # 步骤1.1: 生成备份文件路径
+        # ====================================================================
+        # 将 .json 替换为 _old.json
         backup_path = output_path.replace(".json", "_old.json")
+
         try:
-            import shutil
+            # ================================================================
+            # 步骤1.2: 使用shutil进行文件复制
+            # ================================================================
+            import shutil  # 导入文件操作工具
+            # copy2: 复制文件内容和元数据（权限、时间戳等）
             shutil.copy2(output_path, backup_path)
+            # 记录成功信息
             logger.info(f"Backed up old symbol map to: {backup_path}")
         except Exception as e:
+            # ================================================================
+            # 步骤1.3: 备份失败仅警告，不中断流程
+            # ================================================================
             logger.warning(f"Failed to backup old symbol map: {e}")
-    
-    # Save merged map with clean formatting
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 保存合并后的映射文件
+    # ------------------------------------------------------------------------
     try:
+        # ====================================================================
+        # 步骤2.1: 以UTF-8编码打开文件准备写入
+        # ====================================================================
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(merged_map, f, indent=2, ensure_ascii=False)
+            # ================================================================
+            # 步骤2.2: 将字典序列化为格式化的JSON
+            # ================================================================
+            json.dump(
+                merged_map,           # 要保存的数据
+                f,                    # 文件对象
+                indent=2,             # 2空格缩进，提高可读性
+                ensure_ascii=False    # 保留中文等非ASCII字符，不转义为\uXXXX
+            )
+        # 记录成功信息
         logger.info(f"Saved merged symbol map to: {output_path}")
     except Exception as e:
+        # ====================================================================
+        # 步骤2.3: 保存失败记录错误并重新抛出异常
+        # ====================================================================
         logger.error(f"Failed to save merged symbol map: {e}")
-        raise
+        raise  # 重新抛出异常，让调用者处理
 
 
+# ============================================================================
+# 验证函数
+# ============================================================================
 def validate_merged_output(merged_map: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
     """
-    Validate that merged output has expected structure.
-    
-    Returns:
-        Dictionary categorizing validation issues by type
+    验证合并输出是否具有预期的数据结构
+
+    详细说明：
+    ----------
+    该函数检查合并后的符号映射，识别可能存在的数据质量问题。
+    验证结果按问题类型分类，便于诊断和改进分析流程。
+
+    验证项目：
+    ----------
+    1. 运行时数据完整性：检查是否有类或函数信息
+    2. AST数据完整性：检查是否有导入语句等静态分析信息
+    3. 信息级提示：空列表（可能是__init__.py或配置文件）
+
+    参数：
+    ------
+    merged_map : Dict[str, Dict[str, Any]]
+        合并后的符号映射
+
+    返回：
+    ------
+    Dict[str, List[str]]
+        按问题类型分类的验证结果字典，包含以下键：
+        - "missing_runtime_data": 缺少运行时数据的文件列表
+        - "missing_ast_data": 缺少AST数据的文件列表
+        - "info": 信息级提示（非错误）
+
+    示例：
+    ------
+    >>> issues = validate_merged_output(merged_map)
+    >>> if issues["missing_runtime_data"]:
+    ...     print("警告：以下文件缺少运行时数据：")
+    ...     for issue in issues["missing_runtime_data"]:
+    ...         print(f"  - {issue}")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 初始化问题分类字典
+    # ------------------------------------------------------------------------
     issues = {
-        "missing_runtime_data": [],
-        "missing_ast_data": [],
-        "info": []
+        "missing_runtime_data": [],  # 缺少运行时数据
+        "missing_ast_data": [],      # 缺少AST数据
+        "info": []                   # 信息级提示
     }
-    
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 遍历所有文件进行验证
+    # ------------------------------------------------------------------------
     for file_path, file_data in merged_map.items():
-        # Check for runtime fields (classes/functions)
+        # ====================================================================
+        # 步骤2.1: 检查运行时字段（类和函数）
+        # ====================================================================
+        # 检查是否存在"classes"或"functions"键
         has_runtime = "classes" in file_data or "functions" in file_data
+        # 检查这些键的值是否非空
         has_symbols = (file_data.get("classes") or file_data.get("functions"))
-        
+
+        # ====================================================================
+        # 步骤2.2: 分类记录运行时数据问题
+        # ====================================================================
         if not has_runtime:
+            # 完全缺少运行时字段（可能是纯模块级代码）
             issues["missing_runtime_data"].append(
                 f"{file_path}: No classes or functions (may be module-level code only)"
             )
         elif not has_symbols:
-            # Has the keys but they're empty
+            # 有字段但为空列表（可能是__init__.py或配置文件）
             issues["info"].append(
                 f"{file_path}: Empty classes/functions lists (may be __init__.py or config)"
             )
-        
-        # Check for AST enhancements
+
+        # ====================================================================
+        # 步骤2.3: 检查AST增强字段
+        # ====================================================================
+        # 检查是否存在"imports"字段（AST的核心输出之一）
         if "imports" not in file_data:
             issues["missing_ast_data"].append(f"{file_path}: Missing imports field")
-            
+
+    # ------------------------------------------------------------------------
+    # 步骤3: 返回验证结果
+    # ------------------------------------------------------------------------
     return issues

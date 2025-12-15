@@ -1,114 +1,227 @@
+# =============================================================================
 # io/tracker_io.py
-
+# =============================================================================
 """
-IO module for tracker file operations using contextual keys.
-Handles reading, writing, merging and exporting tracker files.
-Relies on ordered lists of KeyInfo objects, where key strings can be duplicated
-if their associated paths are different. The order is determined by
-hierarchical key string sort, then by normalized path.
+追踪器文件IO模块 (Tracker File IO Module)
+==========================================
+
+功能概述 (Overview):
+    本模块负责追踪器文件的所有IO操作，使用上下文键(contextual keys)系统。
+    处理追踪器文件的读取、写入、合并和导出操作。
+
+核心机制 (Core Mechanism):
+    依赖有序的KeyInfo对象列表，其中：
+    - 键字符串可以重复，只要关联的路径不同
+    - 排序规则：首先按层级键字符串排序，然后按规范化路径排序
+
+主要功能 (Main Features):
+    1. 追踪器文件读写 - 读取和写入各类追踪器文件
+    2. 依赖关系合并 - 合并多个追踪器的依赖关系
+    3. 路径迁移处理 - 处理文件/目录路径变更
+    4. AST验证链接 - 集成AST分析结果
+    5. 缓存管理 - 优化文件读取性能
+
+追踪器类型 (Tracker Types):
+    - mini: 迷你追踪器，跟踪单个模块内部的文件依赖
+    - main: 主追踪器，跟踪模块间的依赖关系
+    - doc: 文档追踪器，跟踪文档文件的依赖
+
+依赖关系 (Dependencies):
+    - core.dependency_grid: 依赖网格操作
+    - core.key_manager: 键管理和排序
+    - io.update_*: 各类追踪器的特定数据
+    - utils.*: 各种工具函数
+
+作者 (Author): Cline Dependency System
+版本 (Version): 8.0.0
 """
 
-import datetime
-import io
-import json
-import logging
-import os
-import re
-import shutil
-import time
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+# =============================================================================
+# 标准库导入 (Standard Library Imports)
+# =============================================================================
+import datetime  # 日期时间处理
+import io  # 核心IO工具
+import json  # JSON数据处理
+import logging  # 日志记录
+import os  # 操作系统接口
+import re  # 正则表达式
+import shutil  # 文件操作工具
+import time  # 时间处理
+from collections import defaultdict  # 默认字典
+from typing import Any, Dict, List, Optional, Set, Tuple  # 类型提示
 
+# =============================================================================
+# 本地模块导入 (Local Module Imports)
+# =============================================================================
+
+# --- 核心模块 - 依赖网格 (Core Module - Dependency Grid) ---
 from cline_utils.dependency_system.core.dependency_grid import (
-    DIAGONAL_CHAR,
-    EMPTY_CHAR,
-    PLACEHOLDER_CHAR,
-    compress,
-    create_initial_grid,
-    decompress,
-    validate_grid,
+    DIAGONAL_CHAR,      # 对角线字符（通常为'/'）
+    EMPTY_CHAR,         # 空字符（通常为' '）
+    PLACEHOLDER_CHAR,   # 占位符字符（通常为'.'）
+    compress,           # 压缩依赖网格行
+    create_initial_grid,# 创建初始依赖网格
+    decompress,         # 解压缩依赖网格行
+    validate_grid,      # 验证网格有效性
 )
 
-# --- Core Imports ---
+# --- 核心模块 - 键管理器 (Core Module - Key Manager) ---
 from cline_utils.dependency_system.core.key_manager import KeyInfo
+# KeyInfo类：存储路径到键的映射信息
+
 from cline_utils.dependency_system.core.key_manager import (
     get_key_from_path as get_key_string_from_path_global,
-)  # string from global map for a path
-from cline_utils.dependency_system.core.key_manager import (
-    get_sortable_parts_for_key,
-    load_global_key_map,
-    load_old_global_key_map,
-    sort_key_strings_hierarchically,
 )
+# 从全局映射中获取路径对应的键字符串
+
+from cline_utils.dependency_system.core.key_manager import (
+    get_sortable_parts_for_key,      # 获取键的可排序部分
+    load_global_key_map,             # 加载全局键映射
+    load_old_global_key_map,         # 加载旧的全局键映射
+    sort_key_strings_hierarchically, # 层级排序键字符串
+)
+
 from cline_utils.dependency_system.core.key_manager import (
     sort_keys as sort_key_info_objects,
-)  # Takes List[KeyInfo], sorts by tier then key_string
+)
+# 排序KeyInfo对象列表：首先按层级，然后按键字符串
+
 from cline_utils.dependency_system.core.key_manager import (
     validate_key as validate_key_format,
 )
+# 验证键格式的有效性
 
-# --- IO Imports (Specific tracker data for paths/filters) ---
+# --- IO模块 - 特定追踪器数据 (IO Modules - Specific Tracker Data) ---
 from cline_utils.dependency_system.io.update_doc_tracker import doc_tracker_data
+# 文档追踪器的数据结构和过滤逻辑
+
 from cline_utils.dependency_system.io.update_main_tracker import main_tracker_data
+# 主追踪器的数据结构和聚合逻辑
+
 from cline_utils.dependency_system.io.update_mini_tracker import get_mini_tracker_data
+# 迷你追踪器的数据结构和模板
+
+# --- 工具模块 - 缓存管理 (Utility Module - Cache Manager) ---
 from cline_utils.dependency_system.utils.cache_manager import (
-    cached,
-    check_file_modified,
-    invalidate_dependent_entries,
+    cached,                        # 缓存装饰器
+    check_file_modified,           # 检查文件修改状态
+    invalidate_dependent_entries,  # 使依赖缓存失效
 )
+
+# --- 工具模块 - 配置管理 (Utility Module - Config Manager) ---
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
+# 配置管理器，读取项目配置
 
-# --- Utility Imports ---
+# --- 工具模块 - 路径工具 (Utility Module - Path Utils) ---
 from cline_utils.dependency_system.utils.path_utils import (
-    get_project_root,
-    is_subpath,
-    join_paths,
-    normalize_path,
+    get_project_root,  # 获取项目根目录
+    is_subpath,        # 检查是否为子路径
+    join_paths,        # 安全连接路径
+    normalize_path,    # 规范化路径
 )
+
+# --- 工具模块 - 追踪器工具 (Utility Module - Tracker Utils) ---
 from cline_utils.dependency_system.utils.tracker_utils import (
-    aggregate_all_dependencies,
-    find_all_tracker_paths,
-    get_key_global_instance_string,
-    read_grid_from_lines,
-    read_key_definitions_from_lines,
-    read_tracker_file_structured,
-    resolve_key_global_instance_to_ki,
+    aggregate_all_dependencies,        # 聚合所有依赖关系
+    find_all_tracker_paths,            # 查找所有追踪器路径
+    get_key_global_instance_string,    # 获取键的全局实例字符串
+    read_grid_from_lines,              # 从行读取网格
+    read_key_definitions_from_lines,   # 从行读取键定义
+    read_tracker_file_structured,      # 结构化读取追踪器文件
+    resolve_key_global_instance_to_ki, # 解析键全局实例到KeyInfo
 )
 
-logger = logging.getLogger(__name__)
+# =============================================================================
+# 日志配置 (Logger Configuration)
+# =============================================================================
+logger = logging.getLogger(__name__)  # 创建模块级别的日志记录器
 
+# =============================================================================
+# 类型别名定义 (Type Alias Definitions)
+# =============================================================================
+# 路径迁移信息类型：{路径: (旧键字符串或None, 新键字符串或None)}
 PathMigrationInfo = Dict[str, Tuple[Optional[str], Optional[str]]]
 
-# --- Constant for AST verified links file (as provided) ---
+# =============================================================================
+# AST验证链接文件常量 (AST Verified Links File Constants)
+# =============================================================================
+
+# AST验证链接文件名
 AST_VERIFIED_LINKS_FILENAME = "ast_verified_links.json"
+
+# 核心目录路径（用于存储AST链接文件）
 _CORE_DIR_FOR_AST_LINKS: Optional[str] = None
+
 try:
+    # -------------------------------------------------------------------------
+    # 动态确定核心目录路径 (Dynamically Determine Core Directory Path)
+    # -------------------------------------------------------------------------
+    # 导入key_manager模块以获取其文件路径
     _key_manager_module_for_path = __import__(
         "cline_utils.dependency_system.core.key_manager", fromlist=[""]
     )
+    # 获取key_manager模块所在目录的绝对路径
     _CORE_DIR_FOR_AST_LINKS = os.path.dirname(
         os.path.abspath(_key_manager_module_for_path.__file__)
     )
 except ImportError:
+    # 如果导入失败，记录错误
     logger.error(
         "TrackerIO: Could not determine core directory for AST links file. Path may be incorrect."
     )
 
 
-# --- build_path_migration_map (Keep existing as provided) ---
+# =============================================================================
+# 路径迁移映射构建 (Path Migration Map Building)
+# =============================================================================
+
 def build_path_migration_map(
     old_global_map: Optional[Dict[str, KeyInfo]], new_global_map: Dict[str, KeyInfo]
 ) -> PathMigrationInfo:
     """
-    Compares old and new global key maps to build a migration map based on paths.
+    构建路径迁移映射 (Build Path Migration Map)
+    ==========================================
 
-    Args:
-        old_global_map: The loaded KeyInfo map from the previous state (or None).
-        new_global_map: The loaded KeyInfo map for the current state.
+    功能说明 (Description):
+        比较旧的和新的全局键映射，基于路径构建迁移映射。
+        用于跟踪文件/目录路径的键变更，处理重命名和移动操作。
 
-    Returns:
-        A dictionary mapping normalized paths to tuples (old_key, new_key).
-        Returns keys as None if the path didn't exist in that state or if maps are missing.
+    参数 (Args):
+        old_global_map (Optional[Dict[str, KeyInfo]]):
+            旧状态的KeyInfo映射（可以为None）
+            - 键：规范化的路径
+            - 值：KeyInfo对象
+
+        new_global_map (Dict[str, KeyInfo]):
+            当前状态的KeyInfo映射
+            - 键：规范化的路径
+            - 值：KeyInfo对象
+
+    返回值 (Returns):
+        PathMigrationInfo: 路径迁移信息字典
+            - 键：规范化的路径
+            - 值：元组(旧键字符串或None, 新键字符串或None)
+            - 如果路径在某个状态中不存在，对应的键为None
+
+    路径分类 (Path Classification):
+        - 稳定路径：同时存在于旧映射和新映射中
+        - 移除路径：仅存在于旧映射中
+        - 新增路径：仅存在于新映射中
+
+    异常 (Raises):
+        ValueError: 如果在全局键映射中发现重复路径
+
+    示例 (Example):
+        >>> old_map = {"/path/file.py": KeyInfo("old/key", False)}
+        >>> new_map = {"/path/file.py": KeyInfo("new/key", False)}
+        >>> migration_map = build_path_migration_map(old_map, new_map)
+        >>> # 返回：{"/path/file.py": ("old/key", "new/key")}
+
+    工作流程 (Workflow):
+        1. 创建旧映射和新映射的反向查找表（路径->键）
+        2. 验证没有重复路径
+        3. 确定稳定、移除和新增的路径
+        4. 填充迁移映射
     """
     path_migration_info: PathMigrationInfo = {}
     logger.debug("Building path migration map based on global key maps...")
@@ -196,52 +309,109 @@ def build_path_migration_map(
     "tracker_paths",
     key_func=lambda project_root, tracker_type="main", module_path=None: f"tracker_path:{normalize_path(project_root)}:{tracker_type}:{normalize_path(module_path) if module_path else 'none'}:{(os.path.getmtime(ConfigManager().config_path) if ConfigManager().config_path and os.path.exists(ConfigManager().config_path) else 0)}",
 )
+# =============================================================================
+# 追踪器路径获取 (Tracker Path Retrieval)
+# =============================================================================
+
 def get_tracker_path(
     project_root: str, tracker_type: str = "main", module_path: Optional[str] = None
 ) -> str:
     """
-    Get the path to the appropriate tracker file based on type. Ensures path uses forward slashes.
+    获取追踪器文件路径 (Get Tracker File Path)
+    =========================================
 
-    Args:
-        project_root: Project root directory
-        tracker_type: Type of tracker ('main', 'doc', or 'mini')
-        module_path: The module path (required for mini-trackers)
-    Returns:
-        Normalized path to the tracker file using forward slashes
+    功能说明 (Description):
+        根据追踪器类型获取相应追踪器文件的路径。
+        确保返回的路径使用正斜杠（forward slashes）。
+
+    参数 (Args):
+        project_root (str): 项目根目录路径
+
+        tracker_type (str): 追踪器类型，默认为"main"
+            - "main": 主追踪器（模块关系追踪器）
+            - "doc": 文档追踪器
+            - "mini": 迷你追踪器（模块内部文件追踪器）
+
+        module_path (Optional[str]): 模块路径
+            - 对于迷你追踪器是必需的
+            - 对于主追踪器和文档追踪器可选
+
+    返回值 (Returns):
+        str: 使用正斜杠规范化的追踪器文件路径
+
+    异常 (Raises):
+        ValueError: 如果迷你追踪器未提供module_path
+        ValueError: 如果tracker_type未知
+
+    示例 (Example):
+        >>> # 获取主追踪器路径
+        >>> main_path = get_tracker_path("/project", "main")
+        >>> # 获取迷你追踪器路径
+        >>> mini_path = get_tracker_path("/project", "mini", "/project/src/core")
+
+    工作流程 (Workflow):
+        1. 规范化输入路径
+        2. 根据追踪器类型调用相应的路径获取函数
+        3. 规范化并返回结果路径
     """
-    project_root = normalize_path(project_root)
-    norm_module_path = normalize_path(module_path) if module_path else None
+
+    # -------------------------------------------------------------------------
+    # 步骤1: 规范化输入路径 (Step 1: Normalize Input Paths)
+    # -------------------------------------------------------------------------
+    project_root = normalize_path(project_root)  # 规范化项目根目录
+    norm_module_path = normalize_path(module_path) if module_path else None  # 规范化模块路径（如果提供）
+
+    # -------------------------------------------------------------------------
+    # 步骤2: 根据追踪器类型获取路径 (Step 2: Get Path by Tracker Type)
+    # -------------------------------------------------------------------------
 
     if tracker_type == "main":
+        # 主追踪器：使用main_tracker_data中的路径获取函数
         return normalize_path(main_tracker_data["get_tracker_path"](project_root))
+
     elif tracker_type == "doc":
+        # 文档追踪器：使用doc_tracker_data中的路径获取函数
         return normalize_path(doc_tracker_data["get_tracker_path"](project_root))
+
     elif tracker_type == "mini":
+        # 迷你追踪器：需要模块路径
+
+        # 验证模块路径是否提供
         if not norm_module_path:
             raise ValueError("module_path must be provided for mini-trackers")
+
+        # 获取迷你追踪器配置
         mini_data_config = get_mini_tracker_data()
+
+        # 检查是否存在专用的路径获取函数
         if "get_tracker_path" in mini_data_config and callable(
             mini_data_config["get_tracker_path"]
-        ):  # Check if dedicated function exists
+        ):
+            # 使用配置中的专用函数
             path_func = mini_data_config["get_tracker_path"]
             return normalize_path(str(path_func(norm_module_path)))
         else:
+            # 使用默认路径生成逻辑
+            # 从模块路径提取模块名称
             module_name = os.path.basename(norm_module_path)
-            if (
-                not module_name and norm_module_path
-            ):  # Handle drive root case, e.g. "H:/"
+
+            # 处理驱动器根目录情况，例如"H:/"
+            if not module_name and norm_module_path:
                 drive, _ = os.path.splitdrive(norm_module_path)
                 module_name = (
                     drive.replace(":", "") + "_drive" if drive else "unknown_module"
                 )
-            elif (
-                not module_name
-            ):  # Handle case like "" or "." if they somehow reach here
+            # 处理空字符串或"."的情况
+            elif not module_name:
                 module_name = "unknown_root_module"
+
+            # 生成迷你追踪器文件路径：<module_path>/<module_name>_module.md
             return normalize_path(
                 os.path.join(norm_module_path, f"{module_name}_module.md")
             )
+
     else:
+        # 未知的追踪器类型，抛出异常
         raise ValueError(f"Unknown tracker type: {tracker_type}")
 
 

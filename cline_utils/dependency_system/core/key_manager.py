@@ -1,100 +1,201 @@
 # key_manager.py
 
 """
-Core module for key management.
+键管理核心模块 / Core module for key management.
+
+基于层次化、上下文模型处理键生成、验证和排序，并支持嵌套子目录的层级提升。
 Handles key generation, validation, and sorting based on a hierarchical,
 contextual model with tier promotion for nested subdirectories.
+
+将全局键映射持久化到文件，并维护先前版本。
 Persists the global key map to a file and maintains the previous version.
+
+键的结构 / Key Structure:
+- 格式: TierDirSubdirFile[#Instance]
+- 示例: 1A (Tier 1, Dir A)
+       1Aa (Tier 1, Dir A, Subdir a)
+       1Aa1 (Tier 1, Dir A, Subdir a, File 1)
+       1A#2 (Tier 1, Dir A, Instance 2 - 全局实例标识符)
+
+层级提升规则 / Tier Promotion Rules:
+- 当在已有子目录键的目录中发现新的子目录时，触发层级提升
+- When a new subdirectory is found in a directory that already has a subdir key, tier promotion is triggered
+- 提升后的目录重置为新层级的 'A' / Promoted directory resets to 'A' in new tier
 """
 
-import json  # Added for saving/loading map
-import logging
-import os
-import re
-import shutil  # Added for renaming
-from collections import defaultdict
-from typing import Dict, List, NamedTuple, Optional, Set, Tuple
+# ============================================================================
+# 标准库导入 / Standard Library Imports
+# ============================================================================
+import json  # JSON 序列化/反序列化 / JSON serialization/deserialization (for saving/loading map)
+import logging  # 日志记录 / Logging
+import os  # 操作系统接口 / Operating system interface
+import re  # 正则表达式 / Regular expressions
+import shutil  # 高级文件操作 / High-level file operations (for renaming)
+from collections import defaultdict  # 默认字典 / Default dictionary
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple  # 类型提示 / Type hints
 
+# ============================================================================
+# 内部模块导入 / Internal Module Imports
+# ============================================================================
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
+# 配置管理器 / Configuration manager
 from cline_utils.dependency_system.utils.path_utils import (
-    get_project_root,
-    normalize_path,
+    get_project_root,  # 获取项目根目录 / Get project root directory
+    normalize_path,    # 路径规范化 / Path normalization
 )
 
-logger = logging.getLogger(__name__)
+# ============================================================================
+# 日志配置 / Logging Configuration
+# ============================================================================
+logger = logging.getLogger(__name__)  # 获取当前模块的日志记录器 / Get logger for this module
 
-# Constants
-ASCII_A_UPPER = 65  # ASCII value for 'A'
-ASCII_Z_UPPER = 90  # ASCII value for 'Z'
-ASCII_A_LOWER = 97  # ASCII value for 'a'
-ASCII_Z_LOWER = 122  # ASCII value for 'z'
+# ============================================================================
+# 常量定义 / Constants Definition
+# ============================================================================
 
-# Updated pattern to allow multi-digit tiers and file numbers,
-# and structure Tier + Dir + [Subdir + [File] | File]
+# ASCII 值常量 / ASCII Value Constants
+ASCII_A_UPPER = 65   # 大写 'A' 的 ASCII 值 / ASCII value for 'A'
+ASCII_Z_UPPER = 90   # 大写 'Z' 的 ASCII 值 / ASCII value for 'Z'
+ASCII_A_LOWER = 97   # 小写 'a' 的 ASCII 值 / ASCII value for 'a'
+ASCII_Z_LOWER = 122  # 小写 'z' 的 ASCII 值 / ASCII value for 'z'
+
+# 键模式定义 / Key Pattern Definitions
+# 更新的模式以允许多位数的层级和文件编号
+# Updated pattern to allow multi-digit tiers and file numbers
+# 结构: Tier + Dir + [Subdir + [File] | File]
+# Structure: Tier + Dir + [Subdir + [File] | File]
 HIERARCHICAL_KEY_PATTERN = r"[1-9]\d*[A-Z](?:[a-z](?:[1-9]\d*)?|[1-9]\d*)?"
-HIERARCHICAL_KEY_PATTERN_INSTANCE = (
-    r"(?:#[1-9][0-9]*)?"  # Optional: # followed by a non-zero digit, then any digits
-)
+
+# 实例标识符模式（可选）/ Instance identifier pattern (optional)
+# 格式: # 后跟非零数字，然后是任意数字 / Format: # followed by a non-zero digit, then any digits
+HIERARCHICAL_KEY_PATTERN_INSTANCE = r"(?:#[1-9][0-9]*)?"
+
+# 完整的键验证模式 / Complete key validation pattern
 KEY_VALIDATION_PATTERN = re.compile(
     f"{HIERARCHICAL_KEY_PATTERN}({HIERARCHICAL_KEY_PATTERN_INSTANCE})$"
 )
 
+# 用于将键拆分为可排序部分的模式（数字和非数字）
 # Pattern for splitting keys into sortable parts (numbers and non-numbers)
 KEY_PATTERN = r"\d+|\D+"
-GLOBAL_KEY_MAP_FILENAME = "global_key_map.json"
-OLD_GLOBAL_KEY_MAP_FILENAME = "global_key_map_old.json"  # <<< NEW
 
+# 文件名常量 / Filename Constants
+GLOBAL_KEY_MAP_FILENAME = "global_key_map.json"          # 当前全局键映射文件 / Current global key map file
+OLD_GLOBAL_KEY_MAP_FILENAME = "global_key_map_old.json"  # 旧全局键映射文件 / Old global key map file
+
+
+# ============================================================================
+# 自定义异常类 / Custom Exception Classes
+# ============================================================================
 
 class KeyGenerationError(ValueError):
-    """Custom exception for key generation failures."""
+    """
+    键生成失败的自定义异常 / Custom exception for key generation failures.
 
-    pass
+    当键生成过程中违反规则或遇到错误时抛出。
+    Raised when key generation rules are violated or errors are encountered during generation.
 
+    继承自 ValueError，用于指示值级别的问题。
+    Inherits from ValueError to indicate value-level issues.
+    """
+    pass  # 继承所有父类功能 / Inherits all parent functionality
+
+
+# ============================================================================
+# 核心数据结构 / Core Data Structures
+# ============================================================================
 
 class KeyInfo(NamedTuple):
-    """Stores information about a generated key and its context."""
+    """
+    存储生成的键及其上下文信息 / Stores information about a generated key and its context.
 
-    key_string: str  # The generated key string (e.g., "1A", "1Aa", "2Ab")
-    norm_path: str  # The normalized absolute path this key represents
-    parent_path: Optional[
-        str
-    ]  # Normalized path of the parent directory containing this item
-    tier: int  # The tier number used in this key_string
-    is_directory: bool  # True if the key represents a directory
+    这是一个不可变的命名元组，用于存储键的所有相关信息。
+    This is an immutable named tuple that stores all relevant information about a key.
+
+    Attributes:
+        key_string: 生成的键字符串 / The generated key string
+                   示例 / Examples: "1A", "1Aa", "2Ab", "1A#2"
+
+        norm_path: 此键代表的规范化绝对路径 / The normalized absolute path this key represents
+                  用于唯一标识文件或目录 / Used to uniquely identify files or directories
+
+        parent_path: 包含此项的父目录的规范化路径 / Normalized path of the parent directory containing this item
+                    对于顶级目录为 None / None for top-level directories
+
+        tier: 此键字符串中使用的层级编号 / The tier number used in this key_string
+             示例: "2Ab" 的 tier 为 2 / Example: tier is 2 for "2Ab"
+
+        is_directory: 如果键代表目录则为 True / True if the key represents a directory
+                     False 表示文件 / False indicates a file
+    """
+
+    key_string: str  # 生成的键字符串 / The generated key string (e.g., "1A", "1Aa", "2Ab")
+    norm_path: str  # 规范化的绝对路径 / The normalized absolute path this key represents
+    parent_path: Optional[str]  # 父目录的规范化路径 / Normalized path of the parent directory
+    tier: int  # 层级编号 / The tier number used in this key_string
+    is_directory: bool  # 是否为目录 / True if the key represents a directory
 
 
-# Moved from dependency_analyzer to break circular dependency (if applicable)
-# Or keep it here if it's fundamental to key logic
+# ============================================================================
+# 辅助函数 / Helper Functions
+# ============================================================================
+
 def get_file_type_for_key(file_path: str) -> str:
     """
-    Determines the file type based on its extension.
+    根据文件扩展名确定文件类型 / Determines the file type based on its extension.
+
+    用于键管理目的的简化版本。
     Simplified version for key management purposes.
 
+    从 dependency_analyzer 移到这里以打破循环依赖（如果适用）。
+    Moved from dependency_analyzer to break circular dependency (if applicable).
+
     Args:
-        file_path: The path to the file.
+        file_path: 文件路径 / The path to the file.
+
     Returns:
-        The file type as a string (e.g., "py", "js", "md", "generic").
+        文件类型字符串 / The file type as a string
+        示例 / Examples: "py", "js", "md", "generic"
     """
+    # 步骤 1: 提取文件扩展名 / Extract file extension
     _, ext = os.path.splitext(file_path)
-    ext = ext.lower()
+    ext = ext.lower()  # 转换为小写以进行不区分大小写的比较 / Convert to lowercase for case-insensitive comparison
+
+    # 步骤 2: 根据扩展名返回文件类型 / Return file type based on extension
     if ext == ".py":
-        return "py"
+        return "py"  # Python 文件 / Python files
     elif ext in (".js", ".ts", ".jsx", ".tsx"):
-        return "js"
+        return "js"  # JavaScript/TypeScript 文件 / JavaScript/TypeScript files
     elif ext in (".md", ".rst"):
-        return "md"
+        return "md"  # 文档文件 / Documentation files
     elif ext in (".html", ".htm"):
-        return "html"
+        return "html"  # HTML 文件 / HTML files
     elif ext == ".css":
-        return "css"
+        return "css"  # CSS 文件 / CSS files
     else:
-        return "generic"
+        return "generic"  # 通用文件类型 / Generic file type
 
 
 def _strip_instance_suffix(key_str: str) -> str:
-    """Return the base key without any #instance suffix."""
+    """
+    返回不带 #instance 后缀的基础键 / Return the base key without any #instance suffix.
+
+    示例 / Examples:
+        "1A#2" -> "1A"
+        "1Aa" -> "1Aa"
+        "" -> ""
+
+    Args:
+        key_str: 可能包含实例后缀的键字符串 / Key string possibly containing instance suffix
+
+    Returns:
+        不带实例后缀的基础键 / Base key without instance suffix
+    """
+    # 检查空字符串 / Check for empty string
     if not key_str:
         return key_str
+
+    # 在 '#' 处分割，只取第一部分 / Split at '#', take only first part
     return key_str.split("#", 1)[0]
 
 
@@ -102,10 +203,30 @@ def _apply_global_instance_suffixes(
     path_to_key_info: Dict[str, KeyInfo], old_map: Optional[Dict[str, KeyInfo]] = None
 ) -> Dict[str, KeyInfo]:
     """
-    Ensure that for any base key that appears more than once globally,
+    应用全局实例后缀以消除键歧义 / Apply global instance suffixes to disambiguate keys.
+
+    确保对于全局出现多次的任何基础键，每个 KeyInfo.key_string 都带有稳定的 '#<n>' 实例编号。
+    Ensures that for any base key that appears more than once globally,
     each KeyInfo.key_string is suffixed with a stable '#<n>' instance number.
+
+    如果基础键只有一个出现，则保持无后缀。
     If only one occurrence exists for a base key, it remains unsuffixed.
+
+    尽可能使用 old_map 稳定实例编号。
     Instance numbers are stabilized using the old_map whenever possible.
+
+    工作原理 / How it works:
+    1. 按基础键分组 KeyInfo / Group KeyInfo by base key
+    2. 对于唯一的基础键，移除任何现有的实例后缀 / For unique base keys, remove any existing instance suffix
+    3. 对于重复的基础键，分配稳定的实例编号 / For duplicate base keys, assign stable instance numbers
+    4. 优先重用旧映射中的实例编号 / Preferentially reuse instance numbers from old map
+
+    Args:
+        path_to_key_info: 路径到 KeyInfo 的映射 / Path to KeyInfo mapping
+        old_map: 可选的旧映射，用于稳定实例编号 / Optional old map for stabilizing instance numbers
+
+    Returns:
+        更新后的路径到 KeyInfo 映射 / Updated path to KeyInfo mapping
     """
     if not path_to_key_info:
         return path_to_key_info

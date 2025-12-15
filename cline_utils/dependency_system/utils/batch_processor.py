@@ -1,58 +1,82 @@
 # utils/batch_processor.py
+# 批处理器工具模块 - Batch Processor Utility Module
 
 """
 Utility module for parallel batch processing.
 Provides efficient parallel execution of tasks with adaptive batch sizing.
+
+批量并行处理的实用工具模块
+提供具有自适应批量大小的高效并行任务执行
 """
 
-import functools  # Needed for passing kwargs
-import logging
-import os
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+# ==================== 导入依赖模块 - Import Dependencies ====================
+import functools  # 函数工具库，用于传递关键字参数 - Function tools for passing kwargs
+import logging  # 日志记录模块 - Logging module
+import os  # 操作系统接口模块 - OS interface module
+import time  # 时间处理模块 - Time handling module
+from concurrent.futures import ThreadPoolExecutor, as_completed  # 线程池执行器和任务完成迭代器 - Thread pool executor and task completion iterator
+from typing import Any, Callable, Dict, List, Optional, TypeVar  # 类型提示 - Type hints
 
+# 注释：移除了缓存导入，因为缓存批处理本身很复杂且通常不需要
 # Removed cache import as caching batch processing itself is complex and often not desired
 # from cline_utils.dependency_system.utils.cache_manager import cached
 
-from cline_utils.dependency_system.utils.phase_tracker import PhaseTracker
+from cline_utils.dependency_system.utils.phase_tracker import PhaseTracker  # 阶段进度跟踪器 - Phase progress tracker
 
-logger = logging.getLogger(__name__)
+# ==================== 日志和类型变量配置 - Logger and Type Variable Configuration ====================
+logger = logging.getLogger(__name__)  # 获取当前模块的日志记录器 - Get logger for current module
 
-T = TypeVar("T")
-R = TypeVar("R")
+# 类型变量 - Type variables for generic typing
+T = TypeVar("T")  # 输入项目的泛型类型 - Generic type for input items
+R = TypeVar("R")  # 处理结果的泛型类型 - Generic type for processing results
 
 
+# ==================== BatchProcessor 批处理器类 ====================
 class BatchProcessor:
-    """Generic batch processor for parallel execution of tasks."""
+    """
+    Generic batch processor for parallel execution of tasks.
+    通用批处理器，用于并行执行任务
+    """
 
     def __init__(
         self,
-        max_workers: Optional[int] = None,
-        batch_size: Optional[int] = None,
-        show_progress: bool = True,
-        phase_name: str = "Processing",
+        max_workers: Optional[int] = None,  # 最大工作线程数 - Maximum worker threads
+        batch_size: Optional[int] = None,  # 批次大小 - Batch size
+        show_progress: bool = True,  # 是否显示进度 - Whether to show progress
+        phase_name: str = "Processing",  # 阶段名称 - Phase name
     ):
         """
         Initialize the batch processor.
+        初始化批处理器
 
         Args:
             max_workers: Maximum number of worker threads (defaults to CPU count * 4, capped at 64)
+                        最大工作线程数（默认为CPU数*4，上限64）
             batch_size: Size of batches to process (defaults to adaptive sizing)
+                       批次处理大小（默认为自适应大小）
             show_progress: Whether to show progress information (prints to stdout)
+                          是否显示进度信息（输出到标准输出）
             phase_name: Name of the phase for the progress tracker
+                       进度跟踪器的阶段名称
         """
-        cpu_count = os.cpu_count() or 8
+        # ========== 步骤1: 计算CPU核心数 - Calculate CPU Core Count ==========
+        cpu_count = os.cpu_count() or 8  # 获取CPU核心数，如果失败则默认为8 - Get CPU count, default to 8 if fails
+
+        # ========== 步骤2: 计算默认工作线程数 - Calculate Default Worker Count ==========
+        # 增加并行度：默认使用4倍CPU数，上限为48以避免线程失控
         # Increase parallelism: use 4x CPUs by default, cap at 48 to avoid runaway threads
-        default_workers = min(4, (cpu_count * 4))
-        # Ensure max_workers is at least 1
-        self.max_workers = max(1, max_workers or default_workers)
-        self.batch_size = batch_size
-        self.show_progress = show_progress
-        self.phase_name = phase_name
-        self.total_items = 0
-        self.processed_items = 0
-        self.start_time = 0.0
+        default_workers = min(4, (cpu_count * 4))  # 默认工作线程数 = min(4, CPU数*4) - Default workers = min(4, CPU*4)
+
+        # ========== 步骤3: 设置最大工作线程数（确保至少为1）- Set max_workers (ensure at least 1) ==========
+        self.max_workers = max(1, max_workers or default_workers)  # 确保max_workers至少为1 - Ensure max_workers is at least 1
+
+        # ========== 步骤4: 初始化实例变量 - Initialize Instance Variables ==========
+        self.batch_size = batch_size  # 批次大小（可选，None表示自适应） - Batch size (optional, None means adaptive)
+        self.show_progress = show_progress  # 是否显示进度 - Whether to show progress
+        self.phase_name = phase_name  # 阶段名称 - Phase name
+        self.total_items = 0  # 总项目数 - Total items count
+        self.processed_items = 0  # 已处理项目数 - Processed items count
+        self.start_time = 0.0  # 开始时间戳 - Start time timestamp
 
     # <<< MODIFIED: Accept **kwargs >>>
     def process_items(

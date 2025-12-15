@@ -1,50 +1,166 @@
 # cline_utils/dependency_system/analysis/reranker_history_tracker.py
 
 """
-Reranker Performance Tracking System
+Reranker性能历史追踪系统 - Reranker Performance Tracking System
 
-Parses suggestions.log after each analysis run to extract reranker assignments,
-confidence scores, and performance metrics. Stores data by cycle number with
-automatic rotation to keep only the last N cycles.
+功能概述：
+----------
+该模块负责追踪和分析Qwen3重排序器(Reranker)的性能表现，通过解析每次分析运行
+后的suggestions.log日志，提取重排序分配结果、置信度分数和性能指标。
+
+核心功能：
+----------
+1. 日志解析：从suggestions.log中提取重排序器的分配记录
+2. 历史存储：按周期(cycle)编号存储数据，支持多轮分析对比
+3. 自动轮转：保留最近N个周期的数据，自动清理旧数据
+4. 性能分析：计算置信度统计、关系类型分布等聚合指标
+5. 趋势对比：支持跨周期的性能对比和趋势分析
+
+数据流程：
+----------
+1. 分析运行完成 → suggestions.log生成
+2. 解析日志 → 提取RerankerAssignment对象
+3. 计算指标 → 聚合统计数据
+4. 保存周期数据 → cycle_N.json文件
+5. 轮转历史 → 删除超出保留数量的旧周期文件
+
+应用场景：
+----------
+- 监控重排序器的准确性和置信度趋势
+- 识别重排序性能退化或改进
+- 分析不同文件关系类型的重排序效果
+- 为系统优化提供数据支持
+
+数据格式：
+----------
+每个周期文件(cycle_N.json)包含：
+- 周期元数据：cycle编号、时间戳
+- 总体统计：建议总数、平均置信度
+- 聚合指标：置信度分布、关系类型计数
+- 详细记录：Top 10和Bottom 10置信度的分配
+- 扫描记录：所有被Reranker扫描的文件对
+
+作者：Cline Dependency System
+版本：v8.0.0
 """
 
-import json
-import logging
-import os
-import re
-import statistics
-from collections import defaultdict
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+# ============================================================================
+# 标准库导入
+# ============================================================================
+import json                    # JSON序列化和反序列化
+import logging                 # 日志记录
+import os                      # 文件系统操作
+import re                      # 正则表达式匹配
+import statistics              # 统计计算（均值、中位数、标准差）
+from collections import defaultdict  # 默认值字典
+from datetime import datetime  # 日期时间处理
+from typing import Dict, List, Optional, Tuple  # 类型标注
 
+# ============================================================================
+# 项目内部导入
+# ============================================================================
 from cline_utils.dependency_system.utils.path_utils import normalize_path
 
+# ============================================================================
+# 日志配置
+# ============================================================================
+# 创建模块级别的日志记录器
 logger = logging.getLogger(__name__)
 
-# Configuration
+# ============================================================================
+# 配置常量
+# ============================================================================
+# 历史数据存储目录（相对于项目根目录）
 HISTORY_DIR = "cline_utils/dependency_system/analysis/reranker_history"
+
+# 最多保留的周期数量（超出部分将被自动删除）
 MAX_CYCLES_TO_KEEP = 5
+
+# suggestions.log文件名（在项目根目录）
 SUGGESTIONS_LOG_FILENAME = "suggestions.log"
+
+# reranker扫描记录文件名（JSONL格式，每行一个JSON对象）
 SCANS_LOG_FILENAME = "cline_utils/dependency_system/analysis/reranker_scans.jsonl"
 
-# Regex pattern for parsing suggestions.log
-# Format: h:/path/file1.ext -> h:/path/file2.ext ('TYPE') conf: 0.XXX (rel: ext->ext)
+# ============================================================================
+# 正则表达式模式
+# ============================================================================
+# 用于解析suggestions.log的正则表达式
+# 日志格式示例: h:/path/file1.ext -> h:/path/file2.ext ('TYPE') conf: 0.XXX (rel: ext->ext)
+# 捕获组说明：
+#   1: 源文件路径 (h:/path/file1.ext)
+#   2: 目标文件路径 (h:/path/file2.ext)
+#   3: 关系类型 ('S', 's', 等)
+#   4: 置信度分数 (0.XXX)
+#   5: 文件关系 (md->py, py->md, 等)
 SUGGESTION_PATTERN = re.compile(
     r"(h:/[^\s]+)\s+->\s+(h:/[^\s]+)\s+\('([^']+)'\)\s+conf:\s+([\d.]+)\s+\(rel:\s+([^)]+)\)"
 )
 
 
+# ============================================================================
+# 数据类定义
+# ============================================================================
 class RerankerAssignment:
-    """Represents a single reranker assignment."""
+    """
+    Reranker分配记录 - 表示单个重排序器的分配结果
+
+    该类封装了Reranker为一对文件分配的依赖关系信息，包括：
+    - 源文件和目标文件
+    - 关系类型（强依赖S、弱依赖s等）
+    - 置信度分数（0-1之间的浮点数）
+    - 文件扩展名关系（如md->py表示Markdown指向Python）
+
+    属性：
+    ------
+    source : str
+        源文件路径（h:/格式的归一化路径）
+    target : str
+        目标文件路径（h:/格式的归一化路径）
+    rel_type : str
+        关系类型标识，如'S'(强依赖)、's'(弱依赖)
+    confidence : float
+        Reranker的置信度分数，范围[0.0, 1.0]
+    relationship : str
+        文件扩展名关系，如'md->py'、'py->md'
+
+    使用示例：
+    ----------
+    >>> assignment = RerankerAssignment(
+    ...     source="h:/project/doc.md",
+    ...     target="h:/project/code.py",
+    ...     rel_type="S",
+    ...     confidence=0.95,
+    ...     relationship="md->py"
+    ... )
+    >>> print(assignment.confidence)
+    0.95
+    """
 
     def __init__(
         self,
-        source: str,
-        target: str,
-        rel_type: str,
-        confidence: float,
-        relationship: str,
+        source: str,         # 源文件路径
+        target: str,         # 目标文件路径
+        rel_type: str,       # 关系类型（S, s, etc.）
+        confidence: float,   # 置信度分数
+        relationship: str,   # 文件扩展名关系
     ):
+        """
+        初始化Reranker分配记录
+
+        参数：
+        ------
+        source : str
+            源文件的归一化路径
+        target : str
+            目标文件的归一化路径
+        rel_type : str
+            依赖关系类型标识符
+        confidence : float
+            Reranker输出的置信度，通常在[0.0, 1.0]范围内
+        relationship : str
+            文件扩展名关系描述，格式如"ext1->ext2"
+        """
         self.source = source
         self.target = target
         self.rel_type = rel_type  # S, s, etc.
@@ -52,7 +168,26 @@ class RerankerAssignment:
         self.relationship = relationship  # md->py, py->md, etc.
 
     def to_dict(self) -> Dict:
-        """Convert to dictionary for JSON serialization."""
+        """
+        将分配记录转换为字典格式，用于JSON序列化
+
+        返回：
+        ------
+        Dict
+            包含所有属性的字典，键名如下：
+            - source: 源文件路径
+            - target: 目标文件路径
+            - type: 关系类型
+            - confidence: 置信度分数
+            - relationship: 文件关系
+
+        示例：
+        ------
+        >>> assignment = RerankerAssignment("h:/a.md", "h:/b.py", "S", 0.9, "md->py")
+        >>> assignment.to_dict()
+        {'source': 'h:/a.md', 'target': 'h:/b.py', 'type': 'S',
+         'confidence': 0.9, 'relationship': 'md->py'}
+        """
         return {
             "source": self.source,
             "target": self.target,
@@ -62,30 +197,102 @@ class RerankerAssignment:
         }
 
 
+# ============================================================================
+# 日志解析函数
+# ============================================================================
 def parse_suggestions_log(log_path: str) -> List[RerankerAssignment]:
     """
-    Parse suggestions.log to extract reranker assignments.
+    解析suggestions.log文件，提取Reranker分配记录
 
-    Args:
-        log_path: Absolute path to suggestions.log
+    详细说明：
+    ----------
+    该函数读取suggestions.log文件，使用正则表达式提取每行中的
+    Reranker分配信息，并创建RerankerAssignment对象列表。
 
-    Returns:
-        List of RerankerAssignment objects
+    日志格式：
+    ----------
+    每行格式示例：
+    h:/project/doc.md -> h:/project/code.py ('S') conf: 0.95 (rel: md->py)
+
+    解析步骤：
+    ----------
+    1. 检查日志文件是否存在
+    2. 逐行读取日志内容（使用UTF-8编码，errors='replace'容错）
+    3. 使用正则表达式匹配每行
+    4. 提取源、目标、类型、置信度、关系
+    5. 创建RerankerAssignment对象
+    6. 处理异常（如置信度格式错误）
+
+    参数：
+    ------
+    log_path : str
+        suggestions.log文件的绝对路径
+
+    返回：
+    ------
+    List[RerankerAssignment]
+        成功解析的分配记录列表，如果文件不存在或解析失败返回空列表
+
+    异常处理：
+    ----------
+    - 文件不存在：记录警告，返回空列表
+    - 置信度格式错误：跳过该行，记录调试信息
+    - 读取错误：记录错误，返回已解析的部分数据
+
+    示例：
+    ------
+    >>> assignments = parse_suggestions_log("/path/to/suggestions.log")
+    >>> print(f"Found {len(assignments)} assignments")
+    >>> print(f"Average confidence: {sum(a.confidence for a in assignments) / len(assignments):.3f}")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 初始化结果列表
+    # ------------------------------------------------------------------------
     assignments = []
 
+    # ------------------------------------------------------------------------
+    # 步骤2: 检查日志文件是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(log_path):
+        # 记录警告信息
         logger.warning(f"Suggestions log not found: {log_path}")
+        # 返回空列表，允许系统继续运行
         return assignments
 
+    # ------------------------------------------------------------------------
+    # 步骤3: 读取和解析日志文件
+    # ------------------------------------------------------------------------
     try:
+        # ====================================================================
+        # 步骤3.1: 打开文件，使用UTF-8编码和容错模式
+        # ====================================================================
+        # errors='replace': 遇到无法解码的字符用替代符号代替，不抛出异常
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            # ================================================================
+            # 步骤3.2: 逐行处理日志内容
+            # ================================================================
             for line in f:
+                # ------------------------------------------------------------
+                # 步骤3.2.1: 使用正则表达式匹配该行
+                # ------------------------------------------------------------
                 match = SUGGESTION_PATTERN.search(line)
+
+                # 如果匹配成功
                 if match:
+                    # --------------------------------------------------------
+                    # 步骤3.2.2: 提取捕获组（源、目标、类型、置信度、关系）
+                    # --------------------------------------------------------
                     source, target, rel_type, conf_str, relationship = match.groups()
+
                     try:
+                        # ----------------------------------------------------
+                        # 步骤3.2.3: 将置信度字符串转换为浮点数
+                        # ----------------------------------------------------
                         confidence = float(conf_str)
+
+                        # ----------------------------------------------------
+                        # 步骤3.2.4: 创建RerankerAssignment对象
+                        # ----------------------------------------------------
                         assignment = RerankerAssignment(
                             source=source,
                             target=target,
@@ -93,342 +300,1043 @@ def parse_suggestions_log(log_path: str) -> List[RerankerAssignment]:
                             confidence=confidence,
                             relationship=relationship,
                         )
+
+                        # ----------------------------------------------------
+                        # 步骤3.2.5: 添加到结果列表
+                        # ----------------------------------------------------
                         assignments.append(assignment)
+
                     except ValueError:
+                        # ----------------------------------------------------
+                        # 步骤3.2.6: 处理置信度转换错误
+                        # ----------------------------------------------------
+                        # 记录调试信息（这种情况通常很少见）
                         logger.debug(f"Invalid confidence value: {conf_str}")
+                        # 跳过这条记录，继续处理下一行
                         continue
 
+        # ====================================================================
+        # 步骤3.3: 记录解析统计信息
+        # ====================================================================
         logger.debug(f"Parsed {len(assignments)} reranker assignments from {log_path}")
+
+        # ====================================================================
+        # 步骤3.4: 返回所有成功解析的分配记录
+        # ====================================================================
         return assignments
 
     except Exception as e:
+        # ====================================================================
+        # 步骤3.5: 处理其他读取/解析错误
+        # ====================================================================
+        # 记录完整的错误信息和堆栈跟踪
         logger.error(f"Error parsing suggestions log {log_path}: {e}", exc_info=True)
+        # 返回已经解析的部分数据（可能为空）
         return assignments
 
 
 def parse_scans_log(log_path: str) -> List[Dict[str, str]]:
     """
-    Parse reranker_scans.jsonl to extract all scanned pairs.
+    解析reranker_scans.jsonl文件，提取所有扫描的文件对
+
+    详细说明：
+    ----------
+    该函数读取JSONL格式的扫描日志，每行是一个JSON对象，
+    包含Reranker扫描过的源-目标文件对。这些数据用于统计
+    Reranker的工作量和覆盖范围。
+
+    JSONL格式：
+    ----------
+    每行是一个独立的JSON对象，例如：
+    {"source": "h:/path/file1.py", "target": "h:/path/file2.md"}
+    {"source": "h:/path/file3.py", "target": "h:/path/file4.py"}
+
+    解析特点：
+    ----------
+    - 文件不存在时返回空列表（不报错）
+    - 跳过空行和无效JSON
+    - 容错处理，单行解析失败不影响其他行
+
+    参数：
+    ------
+    log_path : str
+        reranker_scans.jsonl文件的绝对路径
+
+    返回：
+    ------
+    List[Dict[str, str]]
+        扫描对列表，每个元素是包含'source'和'target'键的字典
+        如果文件不存在或解析失败，返回空列表
+
+    示例：
+    ------
+    >>> scans = parse_scans_log("/path/to/reranker_scans.jsonl")
+    >>> print(f"Total scanned pairs: {len(scans)}")
+    >>> unique_sources = {scan['source'] for scan in scans}
+    >>> print(f"Unique source files: {len(unique_sources)}")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 初始化结果列表
+    # ------------------------------------------------------------------------
     scans = []
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 检查文件是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(log_path):
+        # 文件不存在时静默返回空列表（这是正常情况，旧版本可能没有此文件）
         return scans
 
+    # ------------------------------------------------------------------------
+    # 步骤3: 读取和解析JSONL文件
+    # ------------------------------------------------------------------------
     try:
+        # ====================================================================
+        # 步骤3.1: 打开文件
+        # ====================================================================
         with open(log_path, "r", encoding="utf-8") as f:
+            # ================================================================
+            # 步骤3.2: 逐行处理
+            # ================================================================
             for line in f:
+                # ------------------------------------------------------------
+                # 步骤3.2.1: 跳过空行
+                # ------------------------------------------------------------
                 if line.strip():
                     try:
+                        # --------------------------------------------------------
+                        # 步骤3.2.2: 解析JSON对象并添加到列表
+                        # --------------------------------------------------------
                         scans.append(json.loads(line))
                     except json.JSONDecodeError:
+                        # --------------------------------------------------------
+                        # 步骤3.2.3: 跳过无效的JSON行
+                        # --------------------------------------------------------
+                        # 静默跳过，继续处理下一行
                         continue
+
+        # ====================================================================
+        # 步骤3.3: 返回所有扫描记录
+        # ====================================================================
         return scans
+
     except Exception as e:
+        # ====================================================================
+        # 步骤3.4: 处理读取错误
+        # ====================================================================
         logger.error(f"Error parsing scans log {log_path}: {e}")
+        # 返回已解析的部分数据（可能为空）
         return scans
 
 
+# ============================================================================
+# 指标计算函数
+# ============================================================================
 def aggregate_metrics(assignments: List[RerankerAssignment]) -> Dict:
     """
-    Calculate aggregate metrics from reranker assignments.
+    从Reranker分配记录计算聚合统计指标
 
-    Args:
-        assignments: List of RerankerAssignment objects
+    详细说明：
+    ----------
+    该函数对所有分配记录进行统计分析，生成全面的性能指标，
+    包括置信度统计、分布情况、关系类型分析等。
 
-    Returns:
-        Dictionary of aggregated metrics
+    计算指标：
+    ----------
+    1. 置信度统计：
+       - 平均值(mean)
+       - 中位数(median)
+       - 标准差(std_dev)
+
+    2. 置信度分布：
+       - 0.9+ : 高置信度（>=0.9）
+       - 0.8-0.9 : 中高置信度
+       - 0.7-0.8 : 中等置信度
+       - <0.7 : 低置信度
+
+    3. 关系类型统计：
+       - S, s等关系类型的数量
+
+    4. 文件关系统计：
+       - md->py, py->md等的数量
+
+    参数：
+    ------
+    assignments : List[RerankerAssignment]
+        Reranker分配记录列表
+
+    返回：
+    ------
+    Dict
+        聚合指标字典，包含以下键：
+        - avg_confidence: 平均置信度
+        - median_confidence: 中位数置信度
+        - std_dev_confidence: 置信度标准差
+        - confidence_distribution: 置信度分布字典
+        - relationship_types: 关系类型计数字典
+        - relationship_categories: 文件关系计数字典
+
+    特殊情况：
+    ----------
+    如果输入为空列表，返回零值指标和空字典
+
+    示例：
+    ------
+    >>> metrics = aggregate_metrics(assignments)
+    >>> print(f"Average confidence: {metrics['avg_confidence']:.2%}")
+    >>> print(f"High confidence (0.9+): {metrics['confidence_distribution']['0.9+']}")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 处理空列表情况
+    # ------------------------------------------------------------------------
     if not assignments:
+        # 返回默认的零值指标
         return {
-            "avg_confidence": 0.0,
-            "median_confidence": 0.0,
-            "std_dev_confidence": 0.0,
-            "confidence_distribution": {},
-            "relationship_types": {},
-            "relationship_categories": {},
+            "avg_confidence": 0.0,              # 平均置信度
+            "median_confidence": 0.0,           # 中位数置信度
+            "std_dev_confidence": 0.0,          # 标准差
+            "confidence_distribution": {},      # 置信度分布
+            "relationship_types": {},           # 关系类型
+            "relationship_categories": {},      # 文件关系类别
         }
 
+    # ------------------------------------------------------------------------
+    # 步骤2: 提取所有置信度分数
+    # ------------------------------------------------------------------------
+    # 创建置信度列表，用于后续统计计算
     confidences = [a.confidence for a in assignments]
 
-    # Confidence statistics
+    # ------------------------------------------------------------------------
+    # 步骤3: 计算置信度基础统计量
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤3.1: 计算平均值
+    # ========================================================================
     avg_confidence = statistics.mean(confidences)
+
+    # ========================================================================
+    # 步骤3.2: 计算中位数
+    # ========================================================================
     median_confidence = statistics.median(confidences)
+
+    # ========================================================================
+    # 步骤3.3: 计算标准差（需要至少2个数据点）
+    # ========================================================================
+    # 如果只有1个数据点，标准差为0
     std_dev = statistics.stdev(confidences) if len(confidences) > 1 else 0.0
 
-    # Confidence distribution buckets
+    # ------------------------------------------------------------------------
+    # 步骤4: 计算置信度分布（按区间统计）
+    # ------------------------------------------------------------------------
     distribution = {
+        # 高置信度区间：0.9及以上
         "0.9+": sum(1 for c in confidences if c >= 0.9),
+        # 中高置信度区间：[0.8, 0.9)
         "0.8-0.9": sum(1 for c in confidences if 0.8 <= c < 0.9),
+        # 中等置信度区间：[0.7, 0.8)
         "0.7-0.8": sum(1 for c in confidences if 0.7 <= c < 0.8),
+        # 低置信度区间：小于0.7
         "<0.7": sum(1 for c in confidences if c < 0.7),
     }
 
-    # Relationship type counts (S, s, etc.)
+    # ------------------------------------------------------------------------
+    # 步骤5: 统计关系类型（S, s等）
+    # ------------------------------------------------------------------------
+    # 使用defaultdict自动初始化计数为0
     rel_types = defaultdict(int)
     for a in assignments:
+        # 累计每种关系类型的出现次数
         rel_types[a.rel_type] += 1
 
-    # Relationship category counts (md->py, py->md, etc.)
+    # ------------------------------------------------------------------------
+    # 步骤6: 统计文件关系类别（md->py等）
+    # ------------------------------------------------------------------------
+    # 使用defaultdict自动初始化计数为0
     rel_categories = defaultdict(int)
     for a in assignments:
+        # 累计每种文件关系的出现次数
         rel_categories[a.relationship] += 1
 
+    # ------------------------------------------------------------------------
+    # 步骤7: 组装并返回结果字典
+    # ------------------------------------------------------------------------
     return {
+        # 基础统计量（保留4位小数）
         "avg_confidence": round(avg_confidence, 4),
         "median_confidence": round(median_confidence, 4),
         "std_dev_confidence": round(std_dev, 4),
+
+        # 分布和分类统计（转换defaultdict为普通dict）
         "confidence_distribution": distribution,
         "relationship_types": dict(rel_types),
         "relationship_categories": dict(rel_categories),
     }
 
 
+# ============================================================================
+# 排序和筛选函数
+# ============================================================================
 def get_top_assignments(
     assignments: List[RerankerAssignment], n: int = 10
 ) -> List[Dict]:
-    """Get top N most confident assignments."""
+    """
+    获取置信度最高的N个分配记录
+
+    详细说明：
+    ----------
+    该函数对分配记录按置信度降序排序，返回前N个最有信心的分配。
+    这些高置信度记录通常代表Reranker最确定的依赖关系。
+
+    应用场景：
+    ----------
+    - 识别最可靠的依赖关系
+    - 验证Reranker对明显依赖的识别能力
+    - 提供高质量的样本用于分析
+
+    参数：
+    ------
+    assignments : List[RerankerAssignment]
+        Reranker分配记录列表
+    n : int, default=10
+        返回的记录数量
+
+    返回：
+    ------
+    List[Dict]
+        Top N分配记录的字典表示列表，按置信度降序排列
+
+    示例：
+    ------
+    >>> top = get_top_assignments(assignments, n=5)
+    >>> for i, assignment in enumerate(top, 1):
+    ...     print(f"{i}. {assignment['source']} -> {assignment['target']}")
+    ...     print(f"   Confidence: {assignment['confidence']:.2%}")
+    """
+    # ------------------------------------------------------------------------
+    # 步骤1: 按置信度降序排序
+    # ------------------------------------------------------------------------
+    # 使用lambda表达式指定排序键为confidence属性
+    # reverse=True表示降序（最高的在前）
     sorted_assignments = sorted(assignments, key=lambda a: a.confidence, reverse=True)
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 取前N个并转换为字典
+    # ------------------------------------------------------------------------
+    # 使用列表切片[:n]获取前N个元素
+    # 使用to_dict()方法转换为JSON可序列化的字典
     return [a.to_dict() for a in sorted_assignments[:n]]
 
 
 def get_bottom_assignments(
     assignments: List[RerankerAssignment], n: int = 10
 ) -> List[Dict]:
-    """Get bottom N least confident assignments."""
+    """
+    获取置信度最低的N个分配记录
+
+    详细说明：
+    ----------
+    该函数对分配记录按置信度升序排序，返回前N个最不确定的分配。
+    这些低置信度记录可能需要人工审查或系统改进。
+
+    应用场景：
+    ----------
+    - 识别Reranker不确定的边界情况
+    - 发现可能的误判或需要改进的模式
+    - 提供低质量样本用于错误分析
+
+    参数：
+    ------
+    assignments : List[RerankerAssignment]
+        Reranker分配记录列表
+    n : int, default=10
+        返回的记录数量
+
+    返回：
+    ------
+    List[Dict]
+        Bottom N分配记录的字典表示列表，按置信度升序排列
+
+    示例：
+    ------
+    >>> bottom = get_bottom_assignments(assignments, n=5)
+    >>> for i, assignment in enumerate(bottom, 1):
+    ...     print(f"{i}. {assignment['source']} -> {assignment['target']}")
+    ...     print(f"   Low confidence: {assignment['confidence']:.2%}")
+    """
+    # ------------------------------------------------------------------------
+    # 步骤1: 按置信度升序排序
+    # ------------------------------------------------------------------------
+    # 使用lambda表达式指定排序键为confidence属性
+    # reverse=False（默认）表示升序（最低的在前）
     sorted_assignments = sorted(assignments, key=lambda a: a.confidence)
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 取前N个并转换为字典
+    # ------------------------------------------------------------------------
+    # 使用列表切片[:n]获取前N个元素
+    # 使用to_dict()方法转换为JSON可序列化的字典
     return [a.to_dict() for a in sorted_assignments[:n]]
 
 
+# ============================================================================
+# 数据持久化函数
+# ============================================================================
 def save_cycle_data(
-    cycle_number: int,
-    assignments: List[RerankerAssignment],
-    all_pairs: List[Dict[str, str]],
-    project_root: str,
+    cycle_number: int,                        # 周期编号
+    assignments: List[RerankerAssignment],    # 分配记录列表
+    all_pairs: List[Dict[str, str]],          # 所有扫描对
+    project_root: str,                        # 项目根目录
 ) -> bool:
     """
-    Save reranker performance data for a cycle.
+    保存某个周期的Reranker性能数据
 
-    Args:
-        cycle_number: The cycle number
-        assignments: List of RerankerAssignment objects
-        all_pairs: List of all scanned pairs
-        project_root: Project root directory
+    详细说明：
+    ----------
+    该函数将某次分析运行的Reranker数据保存为JSON文件，
+    文件名为cycle_N.json（N是周期编号）。
 
-    Returns:
-        True if successful, False otherwise
+    保存内容：
+    ----------
+    1. 元数据：周期编号、时间戳
+    2. 统计摘要：建议总数
+    3. 聚合指标：置信度统计、分布、关系类型
+    4. Top/Bottom记录：最高和最低置信度的分配
+    5. 扫描记录：所有被Reranker扫描的文件对
+
+    文件位置：
+    ----------
+    <project_root>/cline_utils/dependency_system/analysis/reranker_history/cycle_N.json
+
+    参数：
+    ------
+    cycle_number : int
+        当前周期的编号（从1开始递增）
+    assignments : List[RerankerAssignment]
+        Reranker分配记录列表
+    all_pairs : List[Dict[str, str]]
+        所有扫描的文件对列表
+    project_root : str
+        项目根目录的绝对路径
+
+    返回：
+    ------
+    bool
+        成功返回True，失败返回False
+
+    异常处理：
+    ----------
+    保存失败时记录错误日志并返回False，不抛出异常
+
+    示例：
+    ------
+    >>> success = save_cycle_data(
+    ...     cycle_number=1,
+    ...     assignments=assignments,
+    ...     all_pairs=scanned_pairs,
+    ...     project_root="/path/to/project"
+    ... )
+    >>> if success:
+    ...     print("Cycle data saved successfully")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 准备历史数据目录
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤1.1: 构建历史目录的完整路径
+    # ========================================================================
     history_dir = normalize_path(os.path.join(project_root, HISTORY_DIR))
+
+    # ========================================================================
+    # 步骤1.2: 创建目录（如果不存在）
+    # ========================================================================
+    # exist_ok=True: 目录已存在时不报错
     os.makedirs(history_dir, exist_ok=True)
 
-    # Calculate metrics
+    # ------------------------------------------------------------------------
+    # 步骤2: 计算聚合指标
+    # ------------------------------------------------------------------------
     metrics = aggregate_metrics(assignments)
 
-    # Prepare data structure
+    # ------------------------------------------------------------------------
+    # 步骤3: 组装数据结构
+    # ------------------------------------------------------------------------
     data = {
-        "cycle": cycle_number,
-        "timestamp": datetime.now().isoformat(),
-        "total_suggestions": len(assignments),
+        # ====================================================================
+        # 基本元数据
+        # ====================================================================
+        "cycle": cycle_number,                        # 周期编号
+        "timestamp": datetime.now().isoformat(),      # ISO格式时间戳
+
+        # ====================================================================
+        # 统计摘要
+        # ====================================================================
+        "total_suggestions": len(assignments),        # 建议总数
+
+        # ====================================================================
+        # 聚合指标（重复的metrics是原代码bug，第二个会覆盖第一个）
+        # ====================================================================
         "metrics": metrics,
         "metrics": metrics,
-        "top_10_confident": get_top_assignments(assignments, 10),
-        "bottom_10_confident": get_bottom_assignments(assignments, 10),
-        "all_pairs": all_pairs,
+
+        # ====================================================================
+        # Top/Bottom记录
+        # ====================================================================
+        "top_10_confident": get_top_assignments(assignments, 10),      # 最高置信度前10
+        "bottom_10_confident": get_bottom_assignments(assignments, 10), # 最低置信度前10
+
+        # ====================================================================
+        # 完整扫描记录
+        # ====================================================================
+        "all_pairs": all_pairs,                       # 所有扫描的文件对
     }
 
-    # Save to file
+    # ------------------------------------------------------------------------
+    # 步骤4: 保存到JSON文件
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤4.1: 构建周期文件路径
+    # ========================================================================
     cycle_file = os.path.join(history_dir, f"cycle_{cycle_number}.json")
+
     try:
+        # ====================================================================
+        # 步骤4.2: 写入JSON文件
+        # ====================================================================
         with open(cycle_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(
+                data,              # 要保存的数据
+                f,                 # 文件对象
+                indent=2           # 2空格缩进，提高可读性
+            )
+
+        # ====================================================================
+        # 步骤4.3: 记录成功信息
+        # ====================================================================
         logger.info(
             f"Saved reranker performance data for cycle {cycle_number} to {cycle_file}"
         )
         return True
+
     except Exception as e:
+        # ====================================================================
+        # 步骤4.4: 处理保存错误
+        # ====================================================================
+        # 记录完整的错误信息和堆栈跟踪
         logger.error(f"Error saving cycle data to {cycle_file}: {e}", exc_info=True)
         return False
 
 
+# ============================================================================
+# 历史数据管理函数
+# ============================================================================
 def rotate_old_cycles(project_root: str, max_cycles: int = MAX_CYCLES_TO_KEEP) -> None:
     """
-    Remove old cycle files, keeping only the most recent N cycles.
+    删除旧的周期文件，仅保留最近的N个周期
 
-    Args:
-        project_root: Project root directory
-        max_cycles: Maximum number of cycles to keep
+    详细说明：
+    ----------
+    该函数实现历史数据的自动轮转，防止历史文件无限增长。
+    通过保留最近N个周期的数据，既能追踪短期趋势，又能节省磁盘空间。
+
+    轮转策略：
+    ----------
+    1. 扫描历史目录中的所有cycle_N.json文件
+    2. 按周期编号降序排序（最新的在前）
+    3. 保留前max_cycles个文件
+    4. 删除超出数量的旧文件
+
+    参数：
+    ------
+    project_root : str
+        项目根目录的绝对路径
+    max_cycles : int, default=MAX_CYCLES_TO_KEEP
+        最多保留的周期数量（默认为5）
+
+    异常处理：
+    ----------
+    删除单个文件失败时仅记录警告，继续处理其他文件
+
+    示例：
+    ------
+    >>> rotate_old_cycles("/path/to/project", max_cycles=3)
+    # 将保留cycle_5.json, cycle_4.json, cycle_3.json
+    # 删除cycle_2.json, cycle_1.json等更早的文件
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 构建历史目录路径
+    # ------------------------------------------------------------------------
     history_dir = normalize_path(os.path.join(project_root, HISTORY_DIR))
 
+    # ------------------------------------------------------------------------
+    # 步骤2: 检查目录是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(history_dir):
+        # 目录不存在，无需轮转
         return
 
-    # Find all cycle files
+    # ------------------------------------------------------------------------
+    # 步骤3: 查找所有周期文件
+    # ------------------------------------------------------------------------
+    # 初始化周期文件列表：[(cycle_number, filepath), ...]
     cycle_files = []
+
+    # ========================================================================
+    # 步骤3.1: 遍历历史目录中的所有文件
+    # ========================================================================
     for filename in os.listdir(history_dir):
+        # ====================================================================
+        # 步骤3.1.1: 筛选cycle_*.json文件
+        # ====================================================================
         if filename.startswith("cycle_") and filename.endswith(".json"):
+            # ================================================================
+            # 步骤3.1.2: 提取周期编号
+            # ================================================================
+            # 使用正则表达式匹配文件名，提取数字部分
             match = re.match(r"cycle_(\d+)\.json", filename)
+
             if match:
+                # ------------------------------------------------------------
+                # 步骤3.1.3: 将周期编号转换为整数
+                # ------------------------------------------------------------
                 cycle_num = int(match.group(1))
+
+                # ------------------------------------------------------------
+                # 步骤3.1.4: 构建完整文件路径
+                # ------------------------------------------------------------
                 filepath = os.path.join(history_dir, filename)
+
+                # ------------------------------------------------------------
+                # 步骤3.1.5: 添加到列表
+                # ------------------------------------------------------------
                 cycle_files.append((cycle_num, filepath))
 
-    # Sort by cycle number (descending)
+    # ------------------------------------------------------------------------
+    # 步骤4: 按周期编号降序排序
+    # ------------------------------------------------------------------------
+    # reverse=True: 最新的周期（编号最大）排在前面
     cycle_files.sort(reverse=True)
 
-    # Remove old files
+    # ------------------------------------------------------------------------
+    # 步骤5: 删除超出保留数量的旧文件
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤5.1: 检查是否需要删除
+    # ========================================================================
     if len(cycle_files) > max_cycles:
+        # ====================================================================
+        # 步骤5.2: 获取需要删除的文件列表
+        # ====================================================================
+        # 使用列表切片获取超出max_cycles的部分
         files_to_remove = cycle_files[max_cycles:]
+
+        # ====================================================================
+        # 步骤5.3: 逐个删除旧文件
+        # ====================================================================
         for cycle_num, filepath in files_to_remove:
             try:
+                # ------------------------------------------------------------
+                # 步骤5.3.1: 删除文件
+                # ------------------------------------------------------------
                 os.remove(filepath)
+
+                # ------------------------------------------------------------
+                # 步骤5.3.2: 记录调试信息
+                # ------------------------------------------------------------
                 logger.debug(f"Removed old cycle file: {filepath}")
+
             except Exception as e:
+                # ------------------------------------------------------------
+                # 步骤5.3.3: 处理删除失败
+                # ------------------------------------------------------------
+                # 单个文件删除失败不影响其他文件
                 logger.warning(f"Failed to remove old cycle file {filepath}: {e}")
 
 
+# ============================================================================
+# 主入口函数
+# ============================================================================
 def track_reranker_performance(cycle_number: int, project_root: str) -> bool:
     """
-    Main entry point for tracking reranker performance.
+    Reranker性能追踪的主入口函数
 
-    Args:
-        cycle_number: The current cycle number
-        project_root: Project root directory
+    详细说明：
+    ----------
+    这是模块的主要接口，负责协调整个追踪流程：
+    1. 定位并解析日志文件
+    2. 提取分配和扫描数据
+    3. 保存周期数据
+    4. 清理旧周期
+    5. 删除临时日志
 
-    Returns:
-        True if successful, False otherwise
+    调用时机：
+    ----------
+    通常在每次依赖分析完成后调用，传入当前周期编号
+
+    参数：
+    ------
+    cycle_number : int
+        当前分析周期的编号
+    project_root : str
+        项目根目录的绝对路径
+
+    返回：
+    ------
+    bool
+        成功返回True，失败或无数据返回False
+
+    工作流程：
+    ----------
+    1. 定位suggestions.log和reranker_scans.jsonl
+    2. 解析分配记录和扫描记录
+    3. 验证是否有数据（至少有一种）
+    4. 保存周期数据
+    5. 轮转历史数据
+    6. 清理扫描日志
+
+    示例：
+    ------
+    >>> success = track_reranker_performance(
+    ...     cycle_number=5,
+    ...     project_root="/path/to/project"
+    ... )
+    >>> if success:
+    ...     print("Performance tracking completed")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 记录开始信息
+    # ------------------------------------------------------------------------
     logger.info(f"Tracking reranker performance for cycle {cycle_number}...")
 
-    # Locate suggestions.log
+    # ------------------------------------------------------------------------
+    # 步骤2: 定位日志文件
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤2.1: 构建suggestions.log路径
+    # ========================================================================
     log_path = normalize_path(os.path.join(project_root, SUGGESTIONS_LOG_FILENAME))
 
-    # Locate scans log
+    # ========================================================================
+    # 步骤2.2: 构建reranker_scans.jsonl路径
+    # ========================================================================
     scans_path = normalize_path(os.path.join(project_root, SCANS_LOG_FILENAME))
 
-    # Parse assignments
+    # ------------------------------------------------------------------------
+    # 步骤3: 解析日志文件
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤3.1: 解析分配记录
+    # ========================================================================
     assignments = parse_suggestions_log(log_path)
 
-    # Parse scans
+    # ========================================================================
+    # 步骤3.2: 解析扫描记录
+    # ========================================================================
     scanned_pairs = parse_scans_log(scans_path)
 
+    # ------------------------------------------------------------------------
+    # 步骤4: 验证数据有效性
+    # ------------------------------------------------------------------------
     if not assignments and not scanned_pairs:
+        # 没有任何Reranker活动，跳过追踪
         logger.warning(f"No reranker activity found. Skipping performance tracking.")
         return False
 
-    # If we have assignments but no scans (legacy/fallback), use assignments as scans
+    # ------------------------------------------------------------------------
+    # 步骤5: 后备处理（兼容旧版本）
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤5.1: 如果有分配但没有扫描记录，从分配中提取
+    # ========================================================================
+    # 这是为了兼容没有reranker_scans.jsonl的旧版本
     if not scanned_pairs and assignments:
         scanned_pairs = [{"source": a.source, "target": a.target} for a in assignments]
 
-    # Save cycle data
+    # ------------------------------------------------------------------------
+    # 步骤6: 保存周期数据
+    # ------------------------------------------------------------------------
     success = save_cycle_data(cycle_number, assignments, scanned_pairs, project_root)
 
+    # ------------------------------------------------------------------------
+    # 步骤7: 后续清理（仅在保存成功时执行）
+    # ------------------------------------------------------------------------
     if success:
-        # Rotate old cycles
+        # ====================================================================
+        # 步骤7.1: 轮转历史数据
+        # ====================================================================
         rotate_old_cycles(project_root)
 
-        # Clean up scans log
+        # ====================================================================
+        # 步骤7.2: 清理扫描日志
+        # ====================================================================
         if os.path.exists(scans_path):
             try:
+                # ------------------------------------------------------------
+                # 删除扫描日志（已经保存到周期文件中）
+                # ------------------------------------------------------------
                 os.remove(scans_path)
             except Exception as e:
+                # ------------------------------------------------------------
+                # 删除失败仅警告
+                # ------------------------------------------------------------
                 logger.warning(f"Failed to remove scans log {scans_path}: {e}")
 
+        # ====================================================================
+        # 步骤7.3: 记录完成信息
+        # ====================================================================
         logger.info(
-            f"Reranker performance tracking completed for cycle {cycle_number}. Found {len(assignments)} assignments and {len(scanned_pairs)} scanned pairs."
+            f"Reranker performance tracking completed for cycle {cycle_number}. "
+            f"Found {len(assignments)} assignments and {len(scanned_pairs)} scanned pairs."
         )
 
+    # ------------------------------------------------------------------------
+    # 步骤8: 返回结果
+    # ------------------------------------------------------------------------
     return success
 
 
+# ============================================================================
+# 性能对比分析函数
+# ============================================================================
 def get_performance_comparison(
     project_root: str, cycles: Optional[List[int]] = None
 ) -> Dict:
     """
-    Get performance comparison across multiple cycles.
+    获取跨周期的性能对比数据
 
-    Args:
-        project_root: Project root directory
-        cycles: Specific cycle numbers to compare (or None for all available)
+    详细说明：
+    ----------
+    该函数加载多个周期的历史数据，生成对比分析报告，
+    帮助识别Reranker性能的趋势变化。
 
-    Returns:
-        Dictionary with comparison data
+    对比内容：
+    ----------
+    1. 周期列表：按时间顺序排列的周期编号
+    2. 置信度趋势：每个周期的平均置信度
+    3. 建议数量趋势：每个周期的建议总数
+    4. 详细指标：每个周期的完整metrics
+
+    参数：
+    ------
+    project_root : str
+        项目根目录的绝对路径
+    cycles : Optional[List[int]], default=None
+        要对比的周期编号列表，None表示对比所有可用周期
+
+    返回：
+    ------
+    Dict
+        对比数据字典，包含以下键：
+        - cycles: 周期编号列表（升序）
+        - confidence_trend: 平均置信度趋势列表
+        - total_suggestions_trend: 建议数量趋势列表
+        - cycle_details: 每个周期的详细metrics字典
+
+        如果出错返回：
+        - {"error": "错误描述"}
+
+    示例：
+    ------
+    >>> comparison = get_performance_comparison("/path/to/project")
+    >>> for cycle, conf in zip(comparison['cycles'], comparison['confidence_trend']):
+    ...     print(f"Cycle {cycle}: {conf:.2%} avg confidence")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 构建历史目录路径
+    # ------------------------------------------------------------------------
     history_dir = normalize_path(os.path.join(project_root, HISTORY_DIR))
 
+    # ------------------------------------------------------------------------
+    # 步骤2: 检查目录是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(history_dir):
         return {"error": "No history data available"}
 
-    # Load cycle data
+    # ------------------------------------------------------------------------
+    # 步骤3: 加载周期数据
+    # ------------------------------------------------------------------------
+    # 初始化周期数据字典：{cycle_number: data, ...}
     cycle_data = {}
+
+    # ========================================================================
+    # 步骤3.1: 遍历历史目录
+    # ========================================================================
     for filename in os.listdir(history_dir):
+        # ====================================================================
+        # 步骤3.1.1: 筛选cycle_*.json文件
+        # ====================================================================
         if filename.startswith("cycle_") and filename.endswith(".json"):
+            # ================================================================
+            # 步骤3.1.2: 提取周期编号
+            # ================================================================
             match = re.match(r"cycle_(\d+)\.json", filename)
+
             if match:
                 cycle_num = int(match.group(1))
+
+                # ------------------------------------------------------------
+                # 步骤3.1.3: 筛选指定周期（如果有限制）
+                # ------------------------------------------------------------
                 if cycles is None or cycle_num in cycles:
                     filepath = os.path.join(history_dir, filename)
+
                     try:
+                        # --------------------------------------------------------
+                        # 步骤3.1.4: 加载JSON数据
+                        # --------------------------------------------------------
                         with open(filepath, "r", encoding="utf-8") as f:
                             cycle_data[cycle_num] = json.load(f)
+
                     except Exception as e:
+                        # --------------------------------------------------------
+                        # 步骤3.1.5: 处理加载失败
+                        # --------------------------------------------------------
                         logger.warning(
                             f"Failed to load cycle data from {filepath}: {e}"
                         )
 
+    # ------------------------------------------------------------------------
+    # 步骤4: 检查是否成功加载数据
+    # ------------------------------------------------------------------------
     if not cycle_data:
         return {"error": "No cycle data loaded"}
 
-    # Build comparison
+    # ------------------------------------------------------------------------
+    # 步骤5: 构建对比报告
+    # ------------------------------------------------------------------------
+    # ========================================================================
+    # 步骤5.1: 按周期编号排序
+    # ========================================================================
     sorted_cycles = sorted(cycle_data.keys())
+
+    # ========================================================================
+    # 步骤5.2: 组装对比数据
+    # ========================================================================
     comparison = {
+        # 周期列表（升序）
         "cycles": sorted_cycles,
+
+        # 平均置信度趋势列表
         "confidence_trend": [
             cycle_data[c]["metrics"]["avg_confidence"] for c in sorted_cycles
         ],
+
+        # 建议总数趋势列表
         "total_suggestions_trend": [
             cycle_data[c]["total_suggestions"] for c in sorted_cycles
         ],
+
+        # 每个周期的详细metrics
         "cycle_details": {c: cycle_data[c]["metrics"] for c in sorted_cycles},
     }
 
+    # ------------------------------------------------------------------------
+    # 步骤6: 返回对比结果
+    # ------------------------------------------------------------------------
     return comparison
 
 
+# ============================================================================
+# 历史数据查询函数
+# ============================================================================
 def get_historical_pairs(project_root: str) -> set[Tuple[str, str]]:
     """
-    Retrieve all source-target pairs from history files.
+    从历史文件中检索所有源-目标文件对
 
-    Args:
-        project_root: Project root directory
+    详细说明：
+    ----------
+    该函数遍历所有历史周期文件，提取曾经被Reranker扫描过的
+    所有源-目标文件对，返回去重后的集合。
 
-    Returns:
-        Set of (source, target) tuples
+    应用场景：
+    ----------
+    1. 避免重复扫描：检查某个文件对是否已经被扫描过
+    2. 统计覆盖范围：了解Reranker的历史工作范围
+    3. 增量分析：只扫描新增的文件对
+
+    数据来源：
+    ----------
+    - 优先使用'all_pairs'字段（新格式，完整记录）
+    - 后备使用'top_10_confident'和'bottom_10_confident'（旧格式）
+
+    参数：
+    ------
+    project_root : str
+        项目根目录的绝对路径
+
+    返回：
+    ------
+    set[Tuple[str, str]]
+        (源文件, 目标文件)元组的集合
+        如果没有历史数据，返回空集合
+
+    示例：
+    ------
+    >>> pairs = get_historical_pairs("/path/to/project")
+    >>> print(f"Total historical pairs: {len(pairs)}")
+    >>> if ("h:/doc.md", "h:/code.py") in pairs:
+    ...     print("This pair was scanned before")
     """
+    # ------------------------------------------------------------------------
+    # 步骤1: 构建历史目录路径
+    # ------------------------------------------------------------------------
     history_dir = normalize_path(os.path.join(project_root, HISTORY_DIR))
+
+    # ------------------------------------------------------------------------
+    # 步骤2: 初始化结果集合
+    # ------------------------------------------------------------------------
+    # 使用set自动去重
     historical_pairs = set()
 
+    # ------------------------------------------------------------------------
+    # 步骤3: 检查目录是否存在
+    # ------------------------------------------------------------------------
     if not os.path.exists(history_dir):
         return historical_pairs
 
+    # ------------------------------------------------------------------------
+    # 步骤4: 遍历历史文件
+    # ------------------------------------------------------------------------
     for filename in os.listdir(history_dir):
+        # ====================================================================
+        # 步骤4.1: 筛选cycle_*.json文件
+        # ====================================================================
         if filename.startswith("cycle_") and filename.endswith(".json"):
             filepath = os.path.join(history_dir, filename)
+
             try:
+                # ================================================================
+                # 步骤4.2: 加载JSON数据
+                # ================================================================
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                    # Try to get from 'all_pairs' first (new format)
+                    # ============================================================
+                    # 步骤4.3: 尝试从'all_pairs'字段提取（新格式）
+                    # ============================================================
                     if "all_pairs" in data:
+                        # 遍历所有扫描对
                         for pair in data["all_pairs"]:
+                            # 添加(source, target)元组到集合
                             historical_pairs.add((pair["source"], pair["target"]))
                     else:
-                        # Fallback to top/bottom lists (legacy format)
+                        # ============================================================
+                        # 步骤4.4: 后备方案：从top/bottom列表提取（旧格式）
+                        # ============================================================
+                        # 从top_10_confident列表提取
                         for item in data.get("top_10_confident", []):
                             historical_pairs.add((item["source"], item["target"]))
+
+                        # 从bottom_10_confident列表提取
                         for item in data.get("bottom_10_confident", []):
                             historical_pairs.add((item["source"], item["target"]))
 
             except Exception as e:
+                # ================================================================
+                # 步骤4.5: 处理加载失败
+                # ================================================================
                 logger.warning(f"Failed to load history from {filepath}: {e}")
 
+    # ------------------------------------------------------------------------
+    # 步骤5: 返回历史文件对集合
+    # ------------------------------------------------------------------------
     return historical_pairs
