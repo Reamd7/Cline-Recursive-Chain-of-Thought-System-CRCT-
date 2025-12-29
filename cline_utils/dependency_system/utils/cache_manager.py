@@ -1,6 +1,38 @@
 """
+缓存管理模块 - 基于动态 TTL 的缓存系统。
 Cache management module with dynamic, TTL-based caching for dependency tracking system.
-Supports on-demand cache creation, automatic expiration, and granular invalidation.
+
+该模块为依赖追踪系统提供动态、基于 TTL (Time-To-Live) 的缓存功能,
+支持按需创建缓存、自动过期和细粒度失效。
+
+It provides dynamic, TTL-based caching for the dependency tracking system,
+supporting on-demand cache creation, automatic expiration, and granular invalidation.
+
+主要功能 | Main Features:
+    - LRU/LFU 淘汰策略 | LRU/LFU eviction policies
+    - TTL 自动过期 | Automatic TTL expiration
+    - 缓存压缩 | Cache compression for large items
+    - 依赖追踪 | Dependency tracking for invalidation
+    - 性能指标 | Performance metrics (hit rate, misses)
+    - 线程安全 | Thread-safe operations
+
+缓存策略 | Cache Strategies:
+    - LRU (Least Recently Used): 最近最少使用淘汰
+    - LFU (Least Frequently Used): 最少使用频率淘汰
+    - ADAPTIVE: 混合 LRU/LFU 策略
+    - FIFO: 先进先出
+    - RANDOM: 随机淘汰
+
+缓存类型 | Cache Types:
+    - embeddings_generation: 嵌入生成缓存 (150 items)
+    - key_generation: 密钥生成缓存 (5000 items)
+    - reranking: 重排序缓存 (1000 items)
+    - default: 默认缓存 (5000 items)
+
+性能优化 | Performance Optimization:
+    - 压缩阈值 | Compression threshold: 1KB
+    - 最小压缩比 | Minimum compression ratio: 10%
+    - 缓存目录 | Cache directory: cline_utils/dependency_system/utils/cache/
 """
 
 import functools

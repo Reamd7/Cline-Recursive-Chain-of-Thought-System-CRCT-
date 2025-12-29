@@ -1,8 +1,34 @@
 # config_manager.py
 
 """
+依赖追踪系统配置管理模块。
 Configuration module for dependency tracking system.
-Handles reading and writing configuration settings.
+
+该模块负责读取和写入配置设置,管理系统级别的配置选项。
+它支持从 .clinerules.config.json 文件加载配置,并提供配置验证功能。
+
+It handles reading and writing configuration settings for the dependency tracking system.
+Supports loading configuration from .clinerules.config.json files and provides validation.
+
+主要功能 | Main Features:
+    - 配置文件加载和解析 | Configuration file loading and parsing
+    - 默认配置管理 | Default configuration management
+    - 路径排除配置 | Path exclusion configuration
+    - 扩展名排除配置 | Extension exclusion configuration
+    - 配置验证 | Configuration validation
+    - 硬件资源配置 | Hardware resource configuration
+
+支持的配置选项 | Supported Configuration Options:
+    - excluded_dirs: 要排除的目录名称列表 | List of directory names to exclude
+    - excluded_extensions: 要排除的文件扩展名列表 | List of file extensions to exclude
+    - code_roots: 代码根目录路径列表 | List of code root directory paths
+    - hardware_config: 硬件资源限制配置 | Hardware resource limit configuration
+    - model_config: 模型选择配置 | Model selection configuration
+
+使用场景 | Use Cases:
+    - 初始化分析器时读取配置 | Read configuration when initializing analyzer
+    - 运行时验证配置有效性 | Validate configuration at runtime
+    - 动态更新排除规则 | Dynamically update exclusion rules
 """
 
 import glob
