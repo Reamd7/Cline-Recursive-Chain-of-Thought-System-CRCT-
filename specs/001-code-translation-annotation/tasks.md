@@ -160,10 +160,10 @@
 
 ### 验证与质量检查
 
-- [ ] T033 [US1] 验证所有翻译的文档格式正确,Markdown 语法无错误 | Verify all translated documents have correct format, no Markdown syntax errors
-- [ ] T034 [US1] 检查技术术语使用一致性,对照 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/specs/001-code-translation-annotation/research.md 中的翻译对照表 | Check technical term consistency against translation table in research.md
-- [ ] T035 [US1] 验证翻译覆盖率 ≥ 95%,所有关键概念都有中文翻译 | Verify translation coverage ≥ 95%, all key concepts have Chinese translations
-- [ ] T036 [US1] 随机抽查 5 个文档,人工审查翻译质量和格式 | Randomly sample 5 documents for manual review of translation quality and format
+- [X] T033 [US1] 验证所有翻译的文档格式正确,Markdown 语法无错误 | Verify all translated documents have correct format, no Markdown syntax errors
+- [X] T034 [US1] 检查技术术语使用一致性,对照 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/specs/001-code-translation-annotation/research.md 中的翻译对照表 | Check technical term consistency against translation table in research.md
+- [X] T035 [US1] 验证翻译覆盖率 ≥ 95%,所有关键概念都有中文翻译 | Verify translation coverage ≥ 95%, all key concepts have Chinese translations
+- [X] T036 [US1] 随机抽查 5 个文档,人工审查翻译质量和格式 | Randomly sample 5 documents for manual review of translation quality and format
 
 **Checkpoint**: User Story 1 完成 - 所有 Markdown 文档已支持段落交替格式的中英双语 | User Story 1 complete - All Markdown documents now support Chinese-English bilingual in paragraph alternating format
 
