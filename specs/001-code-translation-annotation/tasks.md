@@ -119,42 +119,42 @@
 
 ### P1 优先级 - CRCT_Documentation/ 核心文档 (CRCT_Documentation/ - Core Documents)
 
-- [ ] T007 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/Cache_System_Documentation.md,采用段落交替格式 | Translate Cache_System_Documentation.md using paragraph alternating format
-- [ ] T008 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/CHANGELOG.md,采用段落交替格式 | Translate CHANGELOG.md using paragraph alternating format
-- [ ] T009 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/CONFIGURATION.md,采用段落交替格式 | Translate CONFIGURATION.md using paragraph alternating format
-- [ ] T010 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/HARDWARE_OPTIMIZATION.md,采用段落交替格式 | Translate HARDWARE_OPTIMIZATION.md using paragraph alternating format
-- [ ] T011 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/INSTRUCTIONS.md,采用段落交替格式 | Translate INSTRUCTIONS.md using paragraph alternating format
-- [ ] T012 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/MIGRATION_v7.x_to_v8.0.md,采用段落交替格式 | Translate MIGRATION_v7.x_to_v8.0.md using paragraph alternating format
-- [ ] T013 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/RERANKER_GUIDE.md,采用段落交替格式 | Translate RERANKER_GUIDE.md using paragraph alternating format
-- [ ] T014 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/RUNTIME_INSPECTOR.md,采用段落交替格式 | Translate RUNTIME_INSPECTOR.md using paragraph alternating format
-- [ ] T015 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/SES_ARCHITECTURE.md,采用段落交替格式 | Translate SES_ARCHITECTURE.md using paragraph alternating format
-- [ ] T016 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/TESTING_GUIDE.md,采用段落交替格式 | Translate TESTING_GUIDE.md using paragraph alternating format
+- [X] T007 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/Cache_System_Documentation.md,采用段落交替格式 | Translate Cache_System_Documentation.md using paragraph alternating format
+- [X] T008 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/CHANGELOG.md,采用段落交替格式 | Translate CHANGELOG.md using paragraph alternating format
+- [X] T009 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/CONFIGURATION.md,采用段落交替格式 | Translate CONFIGURATION.md using paragraph alternating format
+- [X] T010 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/HARDWARE_OPTIMIZATION.md,采用段落交替格式 | Translate HARDWARE_OPTIMIZATION.md using paragraph alternating format
+- [X] T011 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/INSTRUCTIONS.md,采用段落交替格式 | Translate INSTRUCTIONS.md using paragraph alternating format
+- [X] T012 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/MIGRATION_v7.x_to_v8.0.md,采用段落交替格式 | Translate MIGRATION_v7.x_to_v8.0.md using paragraph alternating format
+- [X] T013 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/RERANKER_GUIDE.md,采用段落交替格式 | Translate RERANKER_GUIDE.md using paragraph alternating format
+- [X] T014 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/RUNTIME_INSPECTOR.md,采用段落交替格式 | Translate RUNTIME_INSPECTOR.md using paragraph alternating format
+- [X] T015 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/SES_ARCHITECTURE.md,采用段落交替格式 | Translate SES_ARCHITECTURE.md using paragraph alternating format
+- [X] T016 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/CRCT_Documentation/TESTING_GUIDE.md,采用段落交替格式 | Translate TESTING_GUIDE.md using paragraph alternating format
 
 **Checkpoint**: CRCT_Documentation/ 核心文档翻译完成 | CRCT_Documentation/ core documents translated
 
 ### P2 优先级 - prompts/ 文档 (prompts/ - Documentation)
 
-- [ ] T017 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/cleanup_consolidation_plugin.md,采用段落交替格式 | Translate cleanup_consolidation_plugin.md using paragraph alternating format
-- [ ] T018 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/core_prompt(put this in Custom Instructions).md,采用段落交替格式 | Translate core_prompt(put this in Custom Instructions).md using paragraph alternating format
-- [ ] T019 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/execution_plugin.md,采用段落交替格式 | Translate execution_plugin.md using paragraph alternating format
-- [ ] T020 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/setup_maintenance_plugin.md,采用段落交替格式 | Translate setup_maintenance_plugin.md using paragraph alternating format
-- [ ] T021 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/strategy_dispatcher_plugin.md,采用段落交替格式 | Translate strategy_dispatcher_plugin.md using paragraph alternating format
-- [ ] T022 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/strategy_worker_plugin.md,采用段落交替格式 | Translate strategy_worker_plugin.md using paragraph alternating format
+- [X] T017 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/cleanup_consolidation_plugin.md,采用段落交替格式 | Translate cleanup_consolidation_plugin.md using paragraph alternating format
+- [X] T018 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/core_prompt(put this in Custom Instructions).md,采用段落交替格式 | Translate core_prompt(put this in Custom Instructions).md using paragraph alternating format
+- [X] T019 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/execution_plugin.md,采用段落交替格式 | Translate execution_plugin.md using paragraph alternating format
+- [X] T020 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/setup_maintenance_plugin.md,采用段落交替格式 | Translate setup_maintenance_plugin.md using paragraph alternating format
+- [X] T021 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/strategy_dispatcher_plugin.md,采用段落交替格式 | Translate strategy_dispatcher_plugin.md using paragraph alternating format
+- [X] T022 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/prompts/strategy_worker_plugin.md,采用段落交替格式 | Translate strategy_worker_plugin.md using paragraph alternating format
 
 **Checkpoint**: prompts/ 文档翻译完成 | prompts/ documents translated
 
 ### P2 优先级 - templates/ 文档 (templates/ - Documentation)
 
-- [ ] T023 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/dispatcher_area_log_template.md,采用段落交替格式 | Translate dispatcher_area_log_template.md using paragraph alternating format
-- [ ] T024 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/hdta_review_progress_template.md,采用段落交替格式 | Translate hdta_review_progress_template.md using paragraph alternating format
-- [ ] T025 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/hierarchical_task_checklist_template.md,采用段落交替格式 | Translate hierarchical_task_checklist_template.md using paragraph alternating format
-- [ ] T026 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/implementation_plan_template.md,采用段落交替格式 | Translate implementation_plan_template.md using paragraph alternating format
-- [ ] T027 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/module_template.md,采用段落交替格式 | Translate module_template.md using paragraph alternating format
-- [ ] T028 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/project_roadmap_template.md,采用段落交替格式 | Translate project_roadmap_template.md using paragraph alternating format
-- [ ] T029 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/roadmap_summary_template.md,采用段落交替格式 | Translate roadmap_summary_template.md using paragraph alternating format
-- [ ] T030 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/system_manifest_template.md,采用段落交替格式 | Translate system_manifest_template.md using paragraph alternating format
-- [ ] T031 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/task_template.md,采用段落交替格式 | Translate task_template.md using paragraph alternating format
-- [ ] T032 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/worker_sub_task_output_template.md,采用段落交替格式 | Translate worker_sub_task_output_template.md using paragraph alternating format
+- [X] T023 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/dispatcher_area_log_template.md,采用段落交替格式 | Translate dispatcher_area_log_template.md using paragraph alternating format
+- [X] T024 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/hdta_review_progress_template.md,采用段落交替格式 | Translate hdta_review_progress_template.md using paragraph alternating format
+- [X] T025 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/hierarchical_task_checklist_template.md,采用段落交替格式 | Translate hierarchical_task_checklist_template.md using paragraph alternating format
+- [X] T026 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/implementation_plan_template.md,采用段落交替格式 | Translate implementation_plan_template.md using paragraph alternating format
+- [X] T027 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/module_template.md,采用段落交替格式 | Translate module_template.md using paragraph alternating format
+- [X] T028 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/project_roadmap_template.md,采用段落交替格式 | Translate project_roadmap_template.md using paragraph alternating format
+- [X] T029 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/roadmap_summary_template.md,采用段落交替格式 | Translate roadmap_summary_template.md using paragraph alternating format
+- [X] T030 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/system_manifest_template.md,采用段落交替格式 | Translate system_manifest_template.md using paragraph alternating format
+- [X] T031 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/task_template.md,采用段落交替格式 | Translate task_template.md using paragraph alternating format
+- [X] T032 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/templates/worker_sub_task_output_template.md,采用段落交替格式 | Translate worker_sub_task_output_template.md using paragraph alternating format
 
 **Checkpoint**: templates/ 文档翻译完成 | templates/ documents translated
 
