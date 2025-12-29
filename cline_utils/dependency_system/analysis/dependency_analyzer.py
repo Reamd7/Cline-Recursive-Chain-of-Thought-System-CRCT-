@@ -1,8 +1,26 @@
 # analysis/dependency_analyzer.py
 
 """
+依赖检测和代码分析模块。
 Analysis module for dependency detection and code analysis.
-Parses files to identify imports, function calls, and other dependency indicators.
+
+该模块负责解析文件以识别导入、函数调用和其他依赖指示器。
+It parses files to identify imports, function calls, and other dependency indicators.
+
+主要功能 | Main Features:
+    - AST 解析 | AST parsing for Python, JavaScript, TypeScript, CSS, HTML
+    - 正则表达式模式匹配 | Regex pattern matching for dependencies
+    - Tree-sitter 解析器支持 | Tree-sitter parser support for multiple languages
+    - 导入语句提取 | Import statement extraction
+    - 函数调用检测 | Function call detection
+    - 链接和引用分析 | Link and reference analysis
+
+支持的文件类型 | Supported File Types:
+    - Python (.py): import, from...import statements
+    - JavaScript/TypeScript (.js, .ts, .jsx, .tsx): import, require statements
+    - Markdown (.md): [text](url) links
+    - HTML (.html): <a href> and <script src> elements
+    - CSS (.css): @import and url() statements
 """
 
 import ast

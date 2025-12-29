@@ -1,9 +1,40 @@
 # analysis/embedding_manager.py
 
 """
+嵌入生成和相似度计算管理模块。
 Module for managing embeddings generation and similarity calculations using contextual keys.
-Handles embedding creation from project files using Symbol Essence Strings (SES) derived from
-the project symbol map, and calculates cosine similarity between embeddings.
+
+该模块处理从项目文件生成嵌入向量,使用从项目符号映射派生的符号本质字符串,
+并计算嵌入之间的余弦相似度。
+
+It handles embedding creation from project files using Symbol Essence Strings (SES) derived
+from the project symbol map, and calculates cosine similarity between embeddings.
+
+主要功能 | Main Features:
+    - 向量嵌入生成 | Vector embedding generation from source code
+    - 符号本质字符串 (SES) | Symbol Essence Strings for semantic representation
+    - 余弦相似度计算 | Cosine similarity calculation
+    - 硬件自适应模型选择 | Hardware-adaptive model selection
+    - Qwen3-4B GGUF 模型支持 | Qwen3-4B GGUF model support (v8.0)
+    - SentenceTransformer 备选 | SentenceTransformer fallback
+    - 批处理优化 | Batch processing optimization
+    - 缓存管理 | Cache management
+
+模型架构 | Model Architecture:
+    - 默认 | Default: sentence-transformers/all-mpnet-base-v2 (384维)
+    - Qwen3 | Qwen3: Qwen3-Embedding-4B-Q6_K (2560维, GGUF格式)
+    - 自动选择 | Auto-selection: 基于 GPU/内存可用性
+
+依赖项 | Dependencies:
+    - torch: PyTorch for tensor operations
+    - numpy: Numerical operations
+    - llama-cpp-python: For GGUF model loading
+    - sentence-transformers: For MPNet model
+
+使用场景 | Use Cases:
+    - 语义依赖搜索 | Semantic dependency search
+    - 代码相似度分析 | Code similarity analysis
+    - 智能依赖建议 | Intelligent dependency suggestions
 """
 import json
 import logging

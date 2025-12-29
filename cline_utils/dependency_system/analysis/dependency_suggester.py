@@ -1,10 +1,38 @@
 # analysis/dependency_suggester.py
 
 """
+基于上下文键的依赖建议模块。
 Analysis module for dependency suggestion using contextual keys.
-Suggests potential dependencies based on code analysis and embeddings.
-Assigns specific characters based on the type of dependency found.
-Outputs path-based dependencies: List[Tuple[target_norm_path, char]]
+
+该模块基于代码分析和嵌入向量建议潜在的依赖关系,
+根据发现的依赖类型分配特定的依赖字符。
+
+It suggests potential dependencies based on code analysis and embeddings,
+assigning specific characters based on the type of dependency found.
+
+主要功能 | Main Features:
+    - 结构化依赖分析 | Structural dependency analysis (AST, imports)
+    - 语义依赖分析 | Semantic dependency analysis (embeddings)
+    - 混合策略 | Hybrid strategy combining both approaches
+    - 路径解析 | Path resolution for module imports
+    - TypeScript 配置解析 | TypeScript configuration (tsconfig.json) parsing
+
+依赖字符定义 | Dependency Character Definitions:
+    - `<` | Row depends on column (行依赖于列)
+    - `>` | Column depends on row (列依赖于行)
+    - `x` | Mutual dependency (相互依赖)
+    - `d` | Documentation dependency (文档依赖)
+    - `o` | Self dependency (自依赖,仅对角线)
+    - `n` | Verified no dependency (确认无依赖)
+    - `p` | Placeholder (占位符,未验证)
+    - `s` | Semantic dependency weak (弱语义依赖,相似度 .06-.07)
+    - `S` | Semantic dependency strong (强语义依赖,相似度 .07+)
+
+输出格式 | Output Format:
+    List[Tuple[target_norm_path, char]] - 目标路径和依赖字符的元组列表
+
+依赖项 | Dependencies:
+    - jsonc-parser: JSON with comments parsing (可选 | optional)
 """
 
 import ast
