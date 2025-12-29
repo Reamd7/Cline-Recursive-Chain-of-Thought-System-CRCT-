@@ -2,14 +2,49 @@
 # 代码分析报告生成器 (Code Analysis Report Generator)
 # ========================================
 """
-代码质量分析工具 - 检测未完成和不当的实现
+代码质量分析工具 - 检测未完成和不当的实现。
+Code quality analysis tool - Detect incomplete and improper implementations.
 
 该脚本会扫描代码库，识别以下问题：
-1. 未完成的实现（TODO、FIXME、pass语句、NotImplementedError等）
-2. 不当的实现（空函数、空类等）
-3. 未使用的代码项（通过pyright分析）
+    1. 未完成的实现（TODO、FIXME、pass语句、NotImplementedError等）
+    2. 不当的实现（空函数、空类等）
+    3. 未使用的代码项（通过pyright分析）
 
-使用Tree-sitter进行精确的AST分析，回退到正则表达式作为备选方案。
+This script scans the codebase and identifies the following issues:
+    1. Incomplete implementations (TODO, FIXME, pass statements, NotImplementedError, etc.)
+    2. Improper implementations (empty functions, empty classes, etc.)
+    3. Unused code items (via pyright analysis)
+
+主要功能:
+    - 使用 Tree-sitter 进行精确的 AST 分析
+    - 回退到正则表达式作为备选方案
+    - 集成 Pyright 静态类型检查器
+    - 生成 Markdown 格式的分析报告
+
+Main features:
+    - Use Tree-sitter for precise AST analysis
+    - Fallback to regex-based analysis as alternative
+    - Integrate with Pyright static type checker
+    - Generate analysis reports in Markdown format
+
+依赖项 (Dependencies):
+    - tree-sitter (可选, optional): Python/JavaScript/TypeScript 语言解析器
+    - pyright (可选, optional): Python 静态类型检查器
+    - cline_utils: 内部工具模块
+
+使用方法 (Usage):
+    # 直接运行脚本
+    # Run the script directly
+    python code_analysis/report_generator.py
+
+Example:
+    >>> from code_analysis.report_generator import scan_file
+    >>> issues = scan_file("my_module.py")
+    >>> print(f"Found {len(issues)} issues")
+
+Author: CRCT Project Team
+Version: 1.0.0
+Last Updated: 2025-12-29
 """
 
 # ========================================
@@ -87,81 +122,155 @@ PYRIGHT_OUTPUT = "pyright_output.json"  # Pyright类型检查器的输出文件
 
 def get_parser(lang_name):
     """
+    获取指定语言的 tree-sitter 解析器。
     Get a tree-sitter parser for the specified language.
 
-    获取指定语言的tree-sitter解析器。
-
-    Tree-sitter是一个通用的解析器生成器工具和增量解析库。
+    Tree-sitter 是一个通用的解析器生成器工具和增量解析库。
     它可以为多种编程语言构建语法树（AST），用于精确的代码分析。
+    相比正则表达式,AST 分析能更准确地识别代码结构,避免误报。
+
+    Tree-sitter is a universal parser generator tool and incremental parsing library.
+    It can build syntax trees (AST) for multiple programming languages for precise code analysis.
+    Compared to regex, AST analysis can more accurately identify code structures and avoid false positives.
+
+    支持的语言:
+        - Python: 函数、类、异步函数定义
+        - JavaScript: 函数声明、箭头函数、类声明
+        - TypeScript: 类型定义、接口、泛型
+        - TSX: JSX 元素、React 组件
+
+    Supported languages:
+        - Python: function, class, async function definitions
+        - JavaScript: function declarations, arrow functions, class declarations
+        - TypeScript: type definitions, interfaces, generics
+        - TSX: JSX elements, React components
 
     Args:
         lang_name (str): 语言名称，可选值：
+                         Language name, valid values:
             - "python": Python语言
             - "javascript": JavaScript语言
             - "typescript": TypeScript语言
             - "tsx": TypeScript/JSX语言
 
     Returns:
-        Parser | None: 配置好的解析器对象，如果失败则返回None
+        Parser | None: 配置好的解析器对象，如果语言不支持或初始化失败则返回 None
+                      Configured parser object, or None if language is not supported or initialization fails
+
+    Raises:
+        (不直接抛出异常,而是返回 None 并打印错误信息)
+        (Does not raise exceptions directly, returns None and prints error message)
+
+    Example:
+        >>> parser = get_parser("python")
+        >>> if parser:
+        ...     tree = parser.parse(source_code)
+        ...     analyze_node(tree.root_node, ...)
     """
     # 检查tree-sitter是否可用
+    # Check if tree-sitter is available
     if not TREE_SITTER_AVAILABLE:
-        return None  # tree-sitter不可用，返回None
+        return None  # tree-sitter不可用，返回None | tree-sitter not available, return None
 
     try:
         # ========================================
         # 步骤1: 创建解析器实例
+        # Step 1: Create parser instance
         # ========================================
-        parser = Parser()  # 创建通用解析器对象
+        parser = Parser()  # 创建通用解析器对象 | Create generic parser object
 
         # ========================================
         # 步骤2: 根据语言名称配置对应的语言解析器
+        # Step 2: Configure language-specific parser based on language name
         # ========================================
         if lang_name == "python":
             # 设置Python语言解析器
+            # Set up Python language parser
             parser.language = Language(tree_sitter_python.language())
         elif lang_name == "javascript":
             # 设置JavaScript语言解析器
+            # Set up JavaScript language parser
             parser.language = Language(tree_sitter_javascript.language())
         elif lang_name == "typescript":
-            # 设置TypeScript语言解析器
+            # 设置TypeScript语言解析器（不含JSX）
+            # Set up TypeScript language parser (without JSX)
             parser.language = Language(tree_sitter_typescript.language_typescript())
         elif lang_name == "tsx":
             # 设置TSX（TypeScript + JSX）语言解析器
+            # Set up TSX (TypeScript + JSX) language parser
             parser.language = Language(tree_sitter_typescript.language_tsx())
         else:
             # 不支持的语言
+            # Unsupported language
             return None
 
-        return parser  # 返回配置好的解析器
+        return parser  # 返回配置好的解析器 | Return configured parser
 
     except Exception as e:
         # 捕获初始化过程中的任何异常
+        # Catch any exceptions during initialization
+        # 使用 print 而不是 raise,避免中断整个分析流程
+        # Use print instead of raise to avoid interrupting the entire analysis flow
         print(f"Error initializing parser for {lang_name}: {e}")
-        return None  # 初始化失败，返回None
+        return None  # 初始化失败，返回None | Initialization failed, return None
 
 
 def analyze_node(node, issues, filepath, source_code):
     """
-    Recursively analyze tree-sitter nodes.
+    递归分析 tree-sitter 节点，检测代码质量问题。
+    Recursively analyze tree-sitter nodes to detect code quality issues.
 
-    递归分析tree-sitter节点，检测代码质量问题。
+    该函数是 AST 分析的核心,它深度优先遍历抽象语法树,检测各类代码问题。
+    递归设计使其能够检测嵌套结构（如类中的方法、方法内部的函数等）。
 
-    该函数遍历抽象语法树（AST），检测以下问题：
-    1. 空函数或仅包含pass/docstring的函数
-    2. 抛出NotImplementedError的函数（未完成的实现）
-    3. 空类或仅包含pass/docstring的类
-    4. JavaScript/TypeScript中的空函数和类
+    This function is the core of AST analysis, performing a depth-first traversal
+    of the abstract syntax tree to detect various code issues.
+    The recursive design enables detection of nested structures (e.g., methods in classes,
+    functions inside methods, etc.).
+
+    检测的问题类型:
+        1. 空函数或仅包含 pass/docstring 的函数
+        2. 抛出 NotImplementedError 的函数（未完成的实现）
+        3. 空类或仅包含 pass/docstring 的类
+        4. JavaScript/TypeScript 中的空函数和类
+
+    Detected issue types:
+        1. Empty functions or functions with only pass/docstring
+        2. Functions raising NotImplementedError (incomplete implementations)
+        3. Empty classes or classes with only pass/docstring
+        4. Empty functions and classes in JavaScript/TypeScript
 
     Args:
-        node: Tree-sitter节点对象
+        node: Tree-sitter 节点对象，表示语法树中的一个节点
+              Tree-sitter node object representing a node in the syntax tree
         issues (list): 问题列表，用于收集发现的问题
-        filepath: 文件路径
-        source_code: 源代码字节串
+                      Issue list for collecting discovered issues
+                      每个问题是一个字典,包含 type, subtype, file, line, content
+                      Each issue is a dict with type, subtype, file, line, content
+        filepath: 文件路径 (str 或 Path)，用于报告
+                  File path (str or Path) for reporting
+        source_code: 源代码字节串 (bytes)，用于节点文本提取
+                     Source code bytes for node text extraction
+
+    Returns:
+        None: 该函数不返回值,而是直接修改传入的 issues 列表
+              None: This function doesn't return a value, modifies the issues list in-place
+
+    Notes:
+        - 该函数是递归的,会遍历所有子节点
+        - "琐碎节点" (trivial nodes) 包括: 注释、pass 语句、文档字符串
+        - 只有"非琐碎节点"全部缺失时才报告问题
+        - 这样可以避免误报正常的桩函数（如抽象方法）
+
+        - This function is recursive and traverses all child nodes
+        - "Trivial nodes" include: comments, pass statements, docstrings
+        - Issues are only reported when ALL "non-trivial nodes" are missing
+        - This avoids false positives on legitimate stubs (e.g., abstract methods)
     """
 
     # ========================================
     # Python语言检查
+    # Python Language Checks
     # ========================================
     if node.type in ("function_definition", "async_function_definition"):
         # 检测函数定义（包括同步和异步函数）
@@ -319,44 +428,83 @@ def analyze_node(node, issues, filepath, source_code):
 
 def scan_file(filepath):
     """
+    扫描单个文件以查找代码质量问题。
     Scan a single file for code quality issues.
 
-    扫描单个文件以查找代码质量问题。
+    该函数是文件级别分析的主要入口点。它结合使用正则表达式和 tree-sitter AST 分析
+    来提供全面的代码质量检查。正则表达式用于检测标记（TODO、FIXME 等），
+    而 AST 分析用于识别结构性问题（空函数、未实现的功能等）。
 
-    该函数结合使用正则表达式和tree-sitter AST分析来检测：
-    - TODO/FIXME标记
-    - 空函数和类
-    - 未实现的功能
-    - 其他代码异味
+    This function is the main entry point for file-level analysis. It combines regex-based
+    and tree-sitter AST analysis to provide comprehensive code quality checks.
+    Regex is used to detect markers (TODO, FIXME, etc.), while AST analysis identifies
+    structural issues (empty functions, unimplemented features, etc.).
+
+    检测方法:
+        1. 正则表达式扫描 (Regex scan): 始终运行，检测 TODO/FIXME 等文本标记
+        2. AST 分析 (AST analysis): 当 tree-sitter 可用时运行，检测结构性问题
+
+    Detection methods:
+        1. Regex scan: Always runs, detects text markers like TODO/FIXME
+        2. AST analysis: Runs when tree-sitter is available, detects structural issues
+
+    智能回退机制:
+        - 如果 tree-sitter 可用于该文件类型，将跳过 'pass' 和 'NotImplementedError' 的正则检查
+        - 这样可以避免重复报告，因为 AST 分析能更准确地检测这些情况
+
+    Smart fallback mechanism:
+        - If tree-sitter is available for the file type, skips regex checks for 'pass' and 'NotImplementedError'
+        - This avoids duplicate reports since AST analysis can detect these cases more accurately
 
     Args:
-        filepath: 要扫描的文件路径
+        filepath: 要扫描的文件路径 (str 或 Path)
+                  File path to scan (str or Path)
 
     Returns:
         list: 发现的问题列表，每个问题是一个字典，包含：
-            - type: 问题类型
-            - subtype: 子类型
-            - file: 文件路径
-            - line: 行号
-            - content: 问题代码片段
+              List of discovered issues, each issue is a dict containing:
+            - type (str): 问题类型 | Issue type (e.g., "Incomplete/Improper", "Unused Item")
+            - subtype (str): 子类型 | Subtype (e.g., "TODO", "Empty/Stub Function")
+            - file (str): 文件路径 | File path
+            - line (int): 行号（从 1 开始）| Line number (1-indexed)
+            - content (str): 问题代码片段或诊断消息 | Problematic code snippet or diagnostic message
+
+    Raises:
+        (不直接抛出异常,所有异常都被捕获并打印到控制台)
+        (Does not raise exceptions directly, all exceptions are caught and printed to console)
+
+    Example:
+        >>> issues = scan_file("my_module.py")
+        >>> for issue in issues:
+        ...     print(f"{issue['type']}: {issue['subtype']} at line {issue['line']}")
     """
-    issues = []  # 初始化问题列表
+    issues = []  # 初始化问题列表 | Initialize issue list
 
     try:
         # ========================================
         # 步骤1: 读取文件内容（二进制模式，用于tree-sitter）
+        # Step 1: Read file content (binary mode for tree-sitter)
         # ========================================
-        with open(filepath, "rb") as f:  # 以二进制模式读取（tree-sitter需要）
-            content = f.read()  # 读取文件内容
+        # tree-sitter 需要二进制输入以正确处理各种字符编码
+        # tree-sitter requires binary input to properly handle various character encodings
+        with open(filepath, "rb") as f:  # 以二进制模式读取（tree-sitter需要）| Read in binary mode
+            content = f.read()  # 读取文件内容 | Read file content
 
         # ========================================
         # 步骤2: 正则表达式扫描（始终运行）
+        # Step 2: Regex scan (always runs)
         # ========================================
         # 用于检测注释和代码中的模式（TODO、FIXME等）
+        # Used to detect patterns in comments and code (TODO, FIXME, etc.)
+        # 即使 tree-sitter 不可用，这部分也能提供基本的问题检测
+        # Even if tree-sitter is unavailable, this provides basic issue detection
         try:
             # 将二进制内容解码为文本
-            text_content = content.decode("utf-8", errors="ignore")  # 忽略解码错误
-            lines = text_content.splitlines()  # 按行分割
+            # Decode binary content to text
+            # errors="ignore" 确保即使有编码问题也能继续处理
+            # errors="ignore" ensures processing continues even with encoding issues
+            text_content = content.decode("utf-8", errors="ignore")  # 忽略解码错误 | Ignore decode errors
+            lines = text_content.splitlines()  # 按行分割 | Split by lines
 
             # 遍历每一行
             for i, line in enumerate(lines):
@@ -569,39 +717,83 @@ def generate_report(issues, unused):
 
 def main():
     """
+    代码分析报告生成器的主入口点。
     Main entry point for the code analysis report generator.
 
-    代码分析报告生成器的主入口点。
+    该函数协调整个代码分析流程,从配置读取到报告生成。
+    它集成了多种分析技术: 正则表达式扫描、AST 分析、静态类型检查。
 
-    执行流程：
-    1. 从配置中获取代码根目录和排除路径
-    2. 运行pyright进行静态类型检查
-    3. 遍历所有代码文件进行扫描
-    4. 收集未使用的代码项
-    5. 生成Markdown格式的报告
+    This function orchestrates the entire code analysis workflow, from configuration
+    reading to report generation. It integrates multiple analysis techniques:
+    regex scanning, AST analysis, and static type checking.
+
+    执行流程:
+        1. 从 ConfigManager 获取代码根目录和排除路径
+        2. 运行 pyright 进行静态类型检查（可选）
+        3. 遍历所有代码文件进行扫描
+        4. 收集未使用的代码项（从 pyright 输出）
+        5. 生成 Markdown 格式的综合报告
+
+    Execution flow:
+        1. Get code root directories and excluded paths from ConfigManager
+        2. Run pyright for static type checking (optional)
+        3. Scan all code files
+        4. Collect unused code items (from pyright output)
+        5. Generate comprehensive Markdown report
+
+    集成点:
+        - ConfigManager: 读取项目配置 (.clinerules)
+        - Pyright: 静态类型检查器,检测未使用项
+        - Tree-sitter: AST 解析器,检测结构性问题
+        - path_utils: 路径排除工具
+
+    Integration points:
+        - ConfigManager: Reads project configuration (.clinerules)
+        - Pyright: Static type checker for unused item detection
+        - Tree-sitter: AST parser for structural issue detection
+        - path_utils: Path exclusion utilities
+
+    Returns:
+        None: 结果写入到 OUTPUT_FILE 指定的文件中
+              Results are written to the file specified by OUTPUT_FILE
+
+    Example:
+        # 直接运行脚本
+        # Run the script directly
+        python code_analysis/report_generator.py
+        # 报告将生成在 code_analysis/issues_report.md
+        # Report will be generated at code_analysis/issues_report.md
     """
-    all_issues = []  # 初始化所有问题的列表
+    all_issues = []  # 初始化所有问题的列表 | Initialize list for all issues
 
     # ========================================
     # 步骤1: 从配置管理器获取配置
+    # Step 1: Get configuration from ConfigManager
     # ========================================
-    code_roots = config.get_code_root_directories()  # 获取代码根目录列表
-    excluded_paths = config.get_excluded_paths()  # 获取要排除的路径列表
+    code_roots = config.get_code_root_directories()  # 获取代码根目录列表 | Get code root directories
+    excluded_paths = config.get_excluded_paths()  # 获取要排除的路径列表 | Get excluded paths
 
     # ========================================
     # 步骤2: 运行pyright进行未使用项分析
+    # Step 2: Run pyright for unused item analysis
     # ========================================
+    # Pyright 是微软开发的 Python 静态类型检查器
+    # Pyright is Microsoft's static type checker for Python
+    # 即使 pyright 返回非零退出代码（发现类型错误）,我们仍然继续处理
+    # Even if pyright returns non-zero exit code (type errors found), we continue processing
     try:
-        print("Running pyright for unused item analysis...")  # 提示用户
+        print("Running pyright for unused item analysis...")  # 提示用户 | Prompt user
         # 将pyright的输出重定向到文件
+        # Redirect pyright output to file
         with open(PYRIGHT_OUTPUT, "w") as f:
             result = subprocess.run(
-                ["pyright", "--outputjson"],  # 以JSON格式输出
-                stdout=f,  # 标准输出重定向到文件
-                stderr=subprocess.STDOUT,  # 标准错误也重定向到文件
-                cwd=project_root,  # 在项目根目录运行
+                ["pyright", "--outputjson"],  # 以JSON格式输出 | Output in JSON format
+                stdout=f,  # 标准输出重定向到文件 | Redirect stdout to file
+                stderr=subprocess.STDOUT,  # 标准错误也重定向到文件 | Redirect stderr too
+                cwd=project_root,  # 在项目根目录运行 | Run from project root
             )
         # 检查pyright的退出代码
+        # Check pyright exit code
         if result.returncode == 0:
             print("Pyright analysis completed successfully.")
         else:
@@ -610,40 +802,56 @@ def main():
             )
     except Exception as e:
         # 捕获运行pyright时的任何异常
+        # Catch any exceptions when running pyright
+        # pyright 可能未安装,此时跳过未使用项分析
+        # pyright may not be installed, skip unused item analysis in this case
         print(f"Warning: Unexpected error running pyright: {e}")
 
     # ========================================
     # 步骤3: 遍历代码根目录并扫描文件
+    # Step 3: Traverse code root directories and scan files
     # ========================================
-    print(f"Scanning code roots: {code_roots}")  # 显示将要扫描的目录
+    print(f"Scanning code roots: {code_roots}")  # 显示将要扫描的目录 | Show directories to scan
 
     # 遍历每个代码根目录
+    # Iterate through each code root directory
     for root_dir in code_roots:
         # ========================================
         # 步骤3a: 处理相对和绝对路径
+        # Step 3a: Handle relative and absolute paths
         # ========================================
         # 解析root_dir（如果需要的话，相对于项目根目录）
+        # Resolve root_dir (relative to project root if needed)
         # ConfigManager通常返回相对于项目根目录的标准化路径或绝对路径
+        # ConfigManager usually returns normalized paths relative to project root or absolute paths
 
         # 我们需要处理code_roots是相对路径还是绝对路径的情况
+        # We need to handle whether code_roots are relative or absolute paths
         # ConfigManager.get_code_root_directories()返回标准化路径，
+        # ConfigManager.get_code_root_directories() returns normalized paths,
         # 如果在.clinerules中定义为相对路径，可能是相对于项目根目录
+        # If defined as relative in .clinerules, may be relative to project root
 
         # 假设从项目根目录运行
+        # Assuming running from project root
         start_dir = root_dir
         if not os.path.exists(start_dir):
             print(f"Warning: Code root {start_dir} does not exist. Skipping.")
-            continue  # 跳过不存在的目录
+            continue  # 跳过不存在的目录 | Skip non-existent directory
 
         # ========================================
         # 步骤3b: 遍历目录树
+        # Step 3b: Traverse directory tree
         # ========================================
         for root, dirs, files in os.walk(start_dir):
             # ========================================
             # 步骤3c: 过滤要排除的目录
+            # Step 3c: Filter excluded directories
             # ========================================
             # 就地修改dirs列表以跳过排除的目录
+            # Modify dirs list in-place to skip excluded directories
             # 这样os.walk就不会进入这些目录
+            # This prevents os.walk from entering these directories
             dirs[:] = [
                 d
                 for d in dirs
@@ -654,34 +862,40 @@ def main():
 
             # ========================================
             # 步骤3d: 处理每个文件
+            # Step 3d: Process each file
             # ========================================
             for file in files:
-                filepath = os.path.join(root, file)  # 构建完整文件路径
+                filepath = os.path.join(root, file)  # 构建完整文件路径 | Build full file path
 
                 # 检查文件路径是否在排除列表中
+                # Check if file path is in exclusion list
                 if path_utils.is_path_excluded(filepath, excluded_paths):
-                    continue  # 跳过排除的文件
+                    continue  # 跳过排除的文件 | Skip excluded file
 
                 # 检查文件扩展名是否在支持的扩展名集合中
-                ext = Path(file).suffix  # 获取文件扩展名
+                # Check if file extension is in supported extensions set
+                ext = Path(file).suffix  # 获取文件扩展名 | Get file extension
                 if ext not in EXTENSIONS:
-                    continue  # 跳过不支持的文件类型
+                    continue  # 跳过不支持的文件类型 | Skip unsupported file types
 
                 # ========================================
                 # 步骤3e: 扫描文件并收集问题
+                # Step 3e: Scan file and collect issues
                 # ========================================
-                all_issues.extend(scan_file(filepath))  # 扫描文件并添加问题到列表
+                all_issues.extend(scan_file(filepath))  # 扫描文件并添加问题到列表 | Scan file and add issues to list
 
     # ========================================
     # 步骤4: 获取未使用的代码项
+    # Step 4: Get unused code items
     # ========================================
-    unused_items = get_unused_items()  # 从pyright输出中提取未使用项
+    unused_items = get_unused_items()  # 从pyright输出中提取未使用项 | Extract unused items from pyright output
 
     # ========================================
     # 步骤5: 生成报告
+    # Step 5: Generate report
     # ========================================
-    generate_report(all_issues, unused_items)  # 生成Markdown报告
-    print(f"Report generated at {OUTPUT_FILE}")  # 通知用户报告已生成
+    generate_report(all_issues, unused_items)  # 生成Markdown报告 | Generate Markdown report
+    print(f"Report generated at {OUTPUT_FILE}")  # 通知用户报告已生成 | Notify user report is generated
 
 
 # ========================================
