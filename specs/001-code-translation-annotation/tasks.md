@@ -103,17 +103,17 @@
 
 ### P0 优先级 - 根目录核心文档 (Root Directory - Core Documents)
 
-- [ ] T001 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/README.md,采用段落交替格式 | Translate README.md using paragraph alternating format
-- [ ] T002 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/CLAUDE.md,采用段落交替格式 | Translate CLAUDE.md using paragraph alternating format
-- [ ] T003 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/DOCUMENTATION_STATUS_REPORT.md,采用段落交替格式 | Translate DOCUMENTATION_STATUS_REPORT.md using paragraph alternating format
+- [X] T001 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/README.md,采用段落交替格式 | Translate README.md using paragraph alternating format
+- [X] T002 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/CLAUDE.md,采用段落交替格式 | Translate CLAUDE.md using paragraph alternating format
+- [X] T003 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/DOCUMENTATION_STATUS_REPORT.md,采用段落交替格式 | Translate DOCUMENTATION_STATUS_REPORT.md using paragraph alternating format
 
 **Checkpoint**: 根目录核心文档翻译完成 | Root directory core documents translated
 
 ### P1 优先级 - cline_docs/ 主要文档 (cline_docs/ - Major Documents)
 
-- [ ] T004 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/activeContext.md,采用段落交替格式 | Translate activeContext.md using paragraph alternating format
-- [ ] T005 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/userProfile.md,采用段落交替格式 | Translate userProfile.md using paragraph alternating format
-- [ ] T006 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/changelog.md,采用段落交替格式 | Translate changelog.md using paragraph alternating format
+- [X] T004 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/activeContext.md,采用段落交替格式 | Translate activeContext.md using paragraph alternating format
+- [X] T005 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/userProfile.md,采用段落交替格式 | Translate userProfile.md using paragraph alternating format
+- [X] T006 [P] [US1] 翻译 /Users/gemini/Documents/backup/Cline-Recursive-Chain-of-Thought-System-CRCT-/cline_docs/changelog.md,采用段落交替格式 | Translate changelog.md using paragraph alternating format
 
 **Checkpoint**: cline_docs/ 主要文档翻译完成 | cline_docs/ major documents translated
 
